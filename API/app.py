@@ -121,15 +121,6 @@ def matmul(A, B):
         return result
     except IndexError: return []
 
-def matadd(A, B):
-    return [[A[i][j] + B[i][j] for j in range(len(A[0]))] for i in range(len(A))]
-
-def matsub(A, B):
-    return [[A[i][j] - B[i][j] for j in range(len(A[0]))] for i in range(len(A))]
-
-def matid(n):
-    return [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
-
 def cholesky_decompose(A):
     n = len(A)
     L = [[0.0] * n for _ in range(n)]
@@ -178,8 +169,21 @@ def gauss_jordan_inverse(M):
                 I[k][j] -= factor * I[i][j]
     return I
 
+def invert_matrix_3x3(M):
+    det = M[0][0]*(M[1][1]*M[2][2] - M[1][2]*M[2][1]) - \
+          M[0][1]*(M[1][0]*M[2][2] - M[1][2]*M[2][0]) + \
+          M[0][2]*(M[1][0]*M[2][1] - M[1][1]*M[2][0])
+    if abs(det) < 1e-15: return None
+    return [
+        [(M[1][1]*M[2][2] - M[1][2]*M[2][1])/det, (M[0][2]*M[2][1] - M[0][1]*M[2][2])/det, (M[0][1]*M[1][2] - M[0][2]*M[1][1])/det],
+        [(M[1][2]*M[2][0] - M[1][0]*M[2][2])/det, (M[0][0]*M[2][2] - M[0][2]*M[2][0])/det, (M[0][2]*M[1][0] - M[0][0]*M[1][2])/det],
+        [(M[1][0]*M[2][1] - M[1][1]*M[2][0])/det, (M[0][1]*M[2][0] - M[0][0]*M[2][1])/det, (M[0][0]*M[1][1] - M[0][1]*M[1][0])/det]
+    ]
+
 def invert_matrix_nxn(M):
     if not M or not M[0]: return None
+    if len(M) == 3 and len(M[0]) == 3:
+        return invert_matrix_3x3(M)
     try:
         L = cholesky_decompose(M)
         L_inv = invert_lower_triangular(L)
@@ -427,15 +431,14 @@ def parse_sp3_preciso(path):
     for sat in sp3_data: sp3_data[sat].sort(key=lambda item: item[0])
     return sp3_data
 
-def lagrange_interpolate(x, x_pts, y_pts):
+def lagrange_weights(x, x_pts):
     n = len(x_pts)
-    val = 0.0
+    weights = [1.0] * n
     for i in range(n):
-        p = 1.0
         for j in range(n):
-            if i != j: p *= (x - x_pts[j]) / (x_pts[i] - x_pts[j])
-        val += y_pts[i] * p
-    return val
+            if i != j: 
+                weights[i] *= (x - x_pts[j]) / (x_pts[i] - x_pts[j])
+    return weights
 
 def interpolate_sp3(sp3_data, sat, t_emision, degree=9):
     global SP3_CACHE, SP3_CACHE_KEYS
@@ -466,10 +469,14 @@ def interpolate_sp3(sp3_data, sat, t_emision, degree=9):
     for p in pts_clk:
         t_pts_clk.append(p[0]); clk_pts.append(p[4])
     
-    val_x = lagrange_interpolate(t_emision, t_pts, x_pts)
-    val_y = lagrange_interpolate(t_emision, t_pts, y_pts)
-    val_z = lagrange_interpolate(t_emision, t_pts, z_pts)
-    val_clk = lagrange_interpolate(t_emision, t_pts_clk, clk_pts)
+    w_xyz = lagrange_weights(t_emision, t_pts)
+    val_x = sum(w * x for w, x in zip(w_xyz, x_pts))
+    val_y = sum(w * y for w, y in zip(w_xyz, y_pts))
+    val_z = sum(w * z for w, z in zip(w_xyz, z_pts))
+    
+    w_clk = lagrange_weights(t_emision, t_pts_clk)
+    val_clk = sum(w * c for w, c in zip(w_clk, clk_pts))
+    
     result = (val_x, val_y, val_z, val_clk)
     
     with SP3_LOCK:
@@ -587,17 +594,6 @@ def correccion_mareas_solidas(X, Y, Z, tow, year, month, day):
     except:
         return 0.0, 0.0, 0.0 
 
-def calcular_saastamoinen(lat_deg, alt, elev_deg):
-    if elev_deg < 5.0: elev_deg = 5.0
-    lat_rad, elev_rad = max(math.radians(lat_deg), -math.pi/2), math.radians(elev_deg)
-    H = max(0.0, min(alt, 40000.0))
-    P = 1013.25 * ((1.0 - 2.2557e-5 * H) ** 5.2568)
-    T = 288.15 - 0.0065 * H
-    e = 6.11 * 0.5 * (10.0 ** (7.5 * (T - 273.15) / (T - 273.15 + 237.3))) * ((1.0 - 2.2557e-5 * H) ** 5.2568)
-    zhd = (0.0022768 * P) / (1.0 - 0.00266 * math.cos(2.0 * lat_rad) - 0.00028 * (H / 1000.0))
-    zwd = 0.0022768 * ((1255.0 / T) + 0.05) * e
-    return (zhd + zwd) * (1.0 / math.sin(elev_rad))
-
 def geodesicas_a_ecef(lat_deg, lon_deg, alt):
     a, e2 = 6378137.0, 0.0066943799901413155
     lat, lon = math.radians(lat_deg), math.radians(lon_deg)
@@ -657,33 +653,12 @@ def calcular_topocentricas(xs, ys, zs, X_usr, Y_usr, Z_usr):
     if az < 0: az += 360.0
     return el, az
 
-def calcular_klobuchar(lat_deg, lon_deg, el_deg, az_deg, tow, alpha, beta):
-    if not any(alpha) and not any(beta): return 0.0
-    phi_u, lam_u = lat_deg / 180.0, lon_deg / 180.0
-    E, A = el_deg / 180.0, az_deg / 180.0
-    psi = 0.0137 / (E + 0.11) - 0.022
-    phi_i = phi_u + psi * math.cos(A * math.pi)
-    if phi_i > 0.416: phi_i = 0.416
-    elif phi_i < -0.416: phi_i = -0.416
-    lam_i = lam_u + (psi * math.sin(A * math.pi)) / math.cos(phi_i * math.pi)
-    phi_m = phi_i + 0.064 * math.cos((lam_i - 1.617) * math.pi)
-    t = 43200.0 * lam_i + tow
-    t = t % 86400.0
-    if t < 0: t += 86400.0
-    F = 1.0 + 16.0 * (0.53 - E) ** 3
-    PER = beta[0] + beta[1]*phi_m + beta[2]*(phi_m**2) + beta[3]*(phi_m**3)
-    if PER < 72000.0: PER = 72000.0
-    AMP = alpha[0] + alpha[1]*phi_m + alpha[2]*(phi_m**2) + alpha[3]*(phi_m**3)
-    if AMP < 0.0: AMP = 0.0
-    x = (2.0 * math.pi * (t - 50400.0)) / PER
-    if abs(x) < 1.5707963267948966:
-        return F * (5e-9 + AMP * (1.0 - (x**2)/2.0 + (x**4)/24.0)) * C_LIGHT
-    return F * 5e-9 * C_LIGHT
-
 def calcular_posicion_satelite_wgs84(eph, t_emision, tau_vuelo, sys_char='G'):
     if not eph or eph['sqrtA'] <= 0.0: return None
     mu_sys = 3.986004418e14 if sys_char in 'EC' else MU
     omega_e_sys = 7.292115e-5 if sys_char == 'C' else OMEGA_E
+    F_REL = -4.442807633e-10
+    
     A = eph['sqrtA'] ** 2
     n0 = math.sqrt(mu_sys / (A ** 3))
     t_k = t_emision - eph['Toe']
@@ -692,7 +667,10 @@ def calcular_posicion_satelite_wgs84(eph, t_emision, tau_vuelo, sys_char='G'):
     elif t_k < -302400: t_k += 604800
     M_k = eph['M0'] + (n0 + eph['Delta_n']) * t_k; E_k = M_k
     for _ in range(5): E_k = M_k + eph['e'] * math.sin(E_k)
-    dt_sat = eph['af0'] + eph['af1'] * t_k + eph['af2'] * (t_k ** 2)
+    
+    delta_tr = F_REL * eph['e'] * eph['sqrtA'] * math.sin(E_k)
+    dt_sat = eph['af0'] + eph['af1'] * t_k + eph['af2'] * (t_k ** 2) + delta_tr
+    
     nu_k = math.atan2((math.sqrt(1 - eph['e']**2) * math.sin(E_k)), (math.cos(E_k) - eph['e']))
     phi_k = nu_k + eph['omega']
     u_k = phi_k + eph['Cus'] * math.sin(2 * phi_k) + eph['Cuc'] * math.cos(2 * phi_k)
@@ -819,10 +797,6 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
         X_b_corr, Y_b_corr, Z_b_corr = X_b + dx_tide, Y_b + dy_tide, Z_b + dz_tide
         
         X_iter, Y_iter, Z_iter = X_b_corr, Y_b_corr, Z_b_corr 
-        lat_b, lon_b, alt_b = ecef_a_geodesicas(X_b_corr, Y_b_corr, Z_b_corr)
-        
-        iono = nav.get('_iono', {'alpha': [0.0]*4, 'beta': [0.0]*4})
-        alpha, beta = iono['alpha'], iono['beta']
         
         sat_positions = {}
         for s, d in sd_epoca.items():
@@ -872,11 +846,9 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
         
         if len(sat_list) < 3: return None, "FAILED", None
         
-        def calc_rho(sp, X, Y, Z, lat, lon, alt, el, az):
+        def calc_rho(sp, X, Y, Z):
             dist = math.sqrt((sp[0]-X)**2 + (sp[1]-Y)**2 + (sp[2]-Z)**2)
-            tropo = calcular_saastamoinen(lat, alt, el)
-            iono_m = calcular_klobuchar(lat, lon, el, az, tr, alpha, beta)
-            return dist + tropo, iono_m, dist
+            return dist, 0.0, dist
 
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
@@ -890,13 +862,12 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
             ref_calcs = {}
             for c, r_sat in ref_sats.items():
                 r_data = sat_positions[r_sat]
-                rho_ref_r_base, iono_ref_r, dist_ref_r = calc_rho(r_data['sp'], X_iter, Y_iter, Z_iter, lat_it, lon_it, alt_it, r_data['el'], r_data['az'])
-                el_ref_b, az_ref_b = calcular_topocentricas(r_data['sp'][0], r_data['sp'][1], r_data['sp'][2], X_b_corr, Y_b_corr, Z_b_corr)
-                rho_ref_b_base, iono_ref_b, _ = calc_rho(r_data['sp'], X_b_corr, Y_b_corr, Z_b_corr, lat_b, lon_b, alt_b, el_ref_b, az_ref_b)
+                rho_ref_r_base, _, dist_ref_r = calc_rho(r_data['sp'], X_iter, Y_iter, Z_iter)
+                rho_ref_b_base, _, _ = calc_rho(r_data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
                 
                 ref_calcs[c] = {
                     'dist_ref_r': dist_ref_r,
-                    'SD_P_calc_ref': (rho_ref_r_base + iono_ref_r) - (rho_ref_b_base + iono_ref_b),
+                    'SD_P_calc_ref': rho_ref_r_base - rho_ref_b_base,
                     'sp': r_data['sp'],
                     'el': r_data['el'],
                     'snr': r_data.get('snr', 30.0),
@@ -909,11 +880,10 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 data = sat_positions[s]
                 rc = ref_calcs[c]
                 
-                rho_i_r_base, iono_i_r, dist_i_r = calc_rho(data['sp'], X_iter, Y_iter, Z_iter, lat_it, lon_it, alt_it, data['el'], data['az'])
-                el_i_b, az_i_b = calcular_topocentricas(data['sp'][0], data['sp'][1], data['sp'][2], X_b_corr, Y_b_corr, Z_b_corr)
-                rho_i_b_base, iono_i_b, _ = calc_rho(data['sp'], X_b_corr, Y_b_corr, Z_b_corr, lat_b, lon_b, alt_b, el_i_b, az_i_b)
+                rho_i_r_base, _, dist_i_r = calc_rho(data['sp'], X_iter, Y_iter, Z_iter)
+                rho_i_b_base, _, _ = calc_rho(data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
                 
-                SD_P_calc_i = (rho_i_r_base + iono_i_r) - (rho_i_b_base + iono_i_b)
+                SD_P_calc_i = rho_i_r_base - rho_i_b_base
                 DD_P_calc = SD_P_calc_i - rc['SD_P_calc_ref']
                 
                 u_i_ecef = [-(data['sp'][0] - X_iter) / dist_i_r, -(data['sp'][1] - Y_iter) / dist_i_r, -(data['sp'][2] - Z_iter) / dist_i_r]
@@ -1001,10 +971,6 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
         X_b_corr, Y_b_corr, Z_b_corr = X_b + dx_tide, Y_b + dy_tide, Z_b + dz_tide
         
         X_iter, Y_iter, Z_iter = X_b_corr, Y_b_corr, Z_b_corr 
-        lat_b, lon_b, alt_b = ecef_a_geodesicas(X_b_corr, Y_b_corr, Z_b_corr)
-        
-        iono = nav.get('_iono', {'alpha': [0.0]*4, 'beta': [0.0]*4})
-        alpha, beta = iono['alpha'], iono['beta']
         
         sat_positions = {}
         for s, d in sd_epoca.items():
@@ -1054,11 +1020,9 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
         
         if len(sat_list) < 3: return None, "FAILED", None
         
-        def calc_rho(sp, X, Y, Z, lat, lon, alt, el, az):
+        def calc_rho(sp, X, Y, Z):
             dist = math.sqrt((sp[0]-X)**2 + (sp[1]-Y)**2 + (sp[2]-Z)**2)
-            tropo = calcular_saastamoinen(lat, alt, el)
-            iono_m = calcular_klobuchar(lat, lon, el, az, tr, alpha, beta)
-            return dist + tropo, iono_m, dist
+            return dist, 0.0, dist
 
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
@@ -1072,13 +1036,12 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
             ref_calcs = {}
             for c, r_sat in ref_sats.items():
                 r_data = sat_positions[r_sat]
-                rho_ref_r_base, iono_ref_r, dist_ref_r = calc_rho(r_data['sp'], X_iter, Y_iter, Z_iter, lat_it, lon_it, alt_it, r_data['el'], r_data['az'])
-                el_ref_b, az_ref_b = calcular_topocentricas(r_data['sp'][0], r_data['sp'][1], r_data['sp'][2], X_b_corr, Y_b_corr, Z_b_corr)
-                rho_ref_b_base, iono_ref_b, _ = calc_rho(r_data['sp'], X_b_corr, Y_b_corr, Z_b_corr, lat_b, lon_b, alt_b, el_ref_b, az_ref_b)
+                rho_ref_r_base, _, dist_ref_r = calc_rho(r_data['sp'], X_iter, Y_iter, Z_iter)
+                rho_ref_b_base, _, _ = calc_rho(r_data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
                 
                 ref_calcs[c] = {
                     'dist_ref_r': dist_ref_r,
-                    'SD_P_calc_ref': (rho_ref_r_base + iono_ref_r) - (rho_ref_b_base + iono_ref_b),
+                    'SD_P_calc_ref': rho_ref_r_base - rho_ref_b_base,
                     'sp': r_data['sp'],
                     'el': r_data['el'],
                     'snr': r_data.get('snr', 30.0),
@@ -1091,11 +1054,10 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 data = sat_positions[s]
                 rc = ref_calcs[c]
                 
-                rho_i_r_base, iono_i_r, dist_i_r = calc_rho(data['sp'], X_iter, Y_iter, Z_iter, lat_it, lon_it, alt_it, data['el'], data['az'])
-                el_i_b, az_i_b = calcular_topocentricas(data['sp'][0], data['sp'][1], data['sp'][2], X_b_corr, Y_b_corr, Z_b_corr)
-                rho_i_b_base, iono_i_b, _ = calc_rho(data['sp'], X_b_corr, Y_b_corr, Z_b_corr, lat_b, lon_b, alt_b, el_i_b, az_i_b)
+                rho_i_r_base, _, dist_i_r = calc_rho(data['sp'], X_iter, Y_iter, Z_iter)
+                rho_i_b_base, _, _ = calc_rho(data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
                 
-                SD_P_calc_i = (rho_i_r_base + iono_i_r) - (rho_i_b_base + iono_i_b)
+                SD_P_calc_i = rho_i_r_base - rho_i_b_base
                 DD_P_calc = SD_P_calc_i - rc['SD_P_calc_ref']
                 
                 u_i_ecef = [-(data['sp'][0] - X_iter) / dist_i_r, -(data['sp'][1] - Y_iter) / dist_i_r, -(data['sp'][2] - Z_iter) / dist_i_r]
@@ -1167,7 +1129,7 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
 # =====================================================================
 # ESTADÍSTICAS Y FILTRADO VINCULANTE (HARD FILTER FLEXIBILIZADO)
 # =====================================================================
-def estadistica_desacoplada(coordenadas, conf_plani, conf_alti, err_hor_max, err_ver_max):
+def estadistica_desacoplada(coordenadas, conf_plani, conf_alti, err_hor_max, err_ver_max, medianas=None):
     if not coordenadas: return None, None, None, 0.0, 0.0, 0.0, 0, 0.0
     
     N_list = [c[0] for c in coordenadas]
@@ -1179,9 +1141,12 @@ def estadistica_desacoplada(coordenadas, conf_plani, conf_alti, err_hor_max, err
         if n == 0: return 0.0
         return s[n//2] if n % 2 == 1 else (s[n//2 - 1] + s[n//2]) / 2.0
 
-    med_N = get_median(N_list)
-    med_E = get_median(E_list)
-    med_Z = get_median(Z_list)
+    if medianas:
+        med_N, med_E, med_Z = medianas
+    else:
+        med_N = get_median(N_list)
+        med_E = get_median(E_list)
+        med_Z = get_median(Z_list)
     
     valid_coords = []
     for c in coordenadas:
@@ -1657,27 +1622,13 @@ def tab3_calibrar():
             
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
-
-            # --- FILTRADO PRE-CALIBRACIÓN: TOP-160 ÉPOCAS POR POTENCIA SNR PROMEDIO ---
-            def calcular_snr_promedio_epoca(sd_epoca):
-                snrs = []
-                for s, d in sd_epoca.items():
-                    if s not in ('_meta', '_tow_b') and isinstance(d, dict):
-                        if 'snr' in d and d['snr'] > 0:
-                            snrs.append(d['snr'])
-                return (sum(snrs) / float(len(snrs))) if snrs else 0.0
-
-            t_sample_ordenadas = sorted(
-                t_sample_full, 
-                key=lambda t: calcular_snr_promedio_epoca(sd_suavizada[t]), 
-                reverse=True
-            )
-
-            t_sample = t_sample_ordenadas[:min(160, total_eps)]
             
-            yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Top-SNR Activo:\n"
+            step = max(1, total_eps // 160)
+            t_sample = t_sample_full[::step]
+            
+            yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Determinista Activo:\n"
             yield f"  [-] Épocas totales en archivo: {total_eps}\n"
-            yield f"  [-] Épocas seleccionadas: {len(t_sample)} (Criterio: Las {len(t_sample)} épocas de mayor potencia SNR del archivo)\n"
+            yield f"  [-] Épocas estadísticas a evaluar: {len(t_sample)} (Criterio: 1 época tomada cada {step} épocas, límite exacto 160)\n"
             
             yield "[PROGRESO] Fase 1: Extracción de Límites y Poblando Caché (Pre-Scan IRLS)...\n"
             coords_raw = []
@@ -1711,6 +1662,11 @@ def tab3_calibrar():
             m_center, m_span = 3.5, 1.5
             cp_center, cp_span = 2.0, 1.0
             ca_center, ca_span = 2.0, 1.0
+            
+            def get_local_median(lst):
+                s = sorted(lst); n = len(s)
+                if n == 0: return 0.0
+                return s[n//2] if n % 2 == 1 else (s[n//2 - 1] + s[n//2]) / 2.0
             
             time_out = False
             for nivel in range(p_iter):
@@ -1746,9 +1702,14 @@ def tab3_calibrar():
                     
                     if not coords: continue
                     
+                    m_N = get_local_median([c[0] for c in coords])
+                    m_E = get_local_median([c[1] for c in coords])
+                    m_Z = get_local_median([c[2] for c in coords])
+                    med_estaticas = (m_N, m_E, m_Z)
+                    
                     for cp in set(cp_grid):
                         for ca in set(ca_grid):
-                            res = estadistica_desacoplada(coords, cp, ca, best_eh, best_ev)
+                            res = estadistica_desacoplada(coords, cp, ca, best_eh, best_ev, med_estaticas)
                             if res[0] is None: continue
                             nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res
                             rmse_3d = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + ((zf - h_r) - utm_c_r)**2)
