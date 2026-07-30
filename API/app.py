@@ -1437,6 +1437,10 @@ def tab1_homogenizar():
             tiempos_base_preordenados = sorted(list(base_raw_dict.keys()), key=lambda k: base_raw_dict[k].get('_meta', (0,0,0,0,0,0)))
             
             for tr in sorted(list(rover_raw_dict.keys()), key=lambda k: rover_raw_dict[k].get('_meta', (0,0,0,0,0,0))):
+                if time.time() - start_time > 28.0:
+                    yield "\n> [ALERTA] Freno de mano de 28.0s alcanzado. Render interrumpiendo Etapa 1...\n"
+                    break
+
                 c += 1
                 if total_epochs > 0 and c % max(1, total_epochs // 10) == 0: 
                     yield f"[PROGRESO] Cotejando épocas con interpolación dinámica flexible (max_gap=2.0s)... {int((c / float(total_epochs)) * 100.0)}%\n"
@@ -1636,6 +1640,9 @@ def tab3_calibrar():
             yield "[PROGRESO] Fase 1: Extracción de Límites y Poblando Caché (Pre-Scan IRLS)...\n"
             coords_raw = []
             for t in t_sample:
+                if time.time() - start_time > 28.0:
+                    yield "\n> [ALERTA] Freno de mano de 28.0s activado. Abortando Fase 1 para evitar timeout de Render.\n"
+                    break
                 if os.path.exists(flag_file): break
                 if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
                 else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
@@ -1686,13 +1693,11 @@ def tab3_calibrar():
                 for m in set(m_grid):
                     if time_out or os.path.exists(flag_file): break
                     
-                    if time.time() - start_time > 28.0:
-                        yield "\n> [ALERTA] Freno de mano activado (28.0s). Abortando bucles para evitar el timeout de Render.\n"
-                        time_out = True
-                        break
-
                     coords = []
                     for t in t_sample:
+                        if time.time() - start_time > 28.0:
+                            time_out = True
+                            break
                         if os.path.exists(flag_file): break
                         if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, m, geom_cache=geom_cache)
                         else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, m, geom_cache=geom_cache)
@@ -1854,6 +1859,9 @@ def tab4_procesar():
             tiempos_base_preordenados = sorted(list(obs_b_raw.keys()), key=lambda k: obs_b_raw[k].get('_meta', (0,0,0,0,0,0)))
             
             for tr in rover_tows:
+                if time.time() - start_time > 28.0:
+                    yield "\n> [ALERTA] Freno de mano de 28.0s activado. Abortando interpolación para evitar timeout...\n"
+                    break
                 base_interp = interpolar_base_a_rover(obs_b_raw, tr, max_gap=p_max_gap, tiempos_base=tiempos_base_preordenados)
                 if base_interp:
                     obs_b_sync[tr] = base_interp
