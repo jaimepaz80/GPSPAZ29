@@ -847,28 +847,38 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
         
         if len(sat_list) < 3: return None, "FAILED", None
         
-        def calc_rho(sp, X, Y, Z):
-            dist = math.sqrt((sp[0]-X)**2 + (sp[1]-Y)**2 + (sp[2]-Z)**2)
-            return dist, 0.0, dist
+        # Pre-calculos Trigonométricos Extraídos del Bucle
+        lat_init, lon_init, _ = ecef_a_geodesicas(X_iter, Y_iter, Z_iter)
+        R_enu = obtener_matriz_rotacion_enu(lat_init, lon_init)
+        
+        base_rho = {}
+        for s_key, s_data in sat_positions.items():
+            base_rho[s_key] = math.sqrt((s_data['sp'][0]-X_b_corr)**2 + (s_data['sp'][1]-Y_b_corr)**2 + (s_data['sp'][2]-Z_b_corr)**2)
+            
+        w_P_cache = {}
+        for i, s in enumerate(sat_list):
+            el_rad_i = math.radians(sat_positions[s]['el'])
+            el_rad_ref = math.radians(sat_positions[ref_sats[s[0]]]['el'])
+            snr_i = sat_positions[s].get('snr', 30.0)
+            snr_ref = sat_positions[ref_sats[s[0]]].get('snr', 30.0)
+            factor_snr_i = min(1.0, max(0.1, snr_i / 40.0))
+            factor_snr_ref = min(1.0, max(0.1, snr_ref / 40.0))
+            w_P_cache[s] = (math.sin(el_rad_i) ** 2) * (math.sin(el_rad_ref) ** 2) * factor_snr_i * factor_snr_ref
 
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
         for iteracion in range(8):
-            lat_it, lon_it, alt_it = ecef_a_geodesicas(X_iter, Y_iter, Z_iter)
-            R_enu = obtener_matriz_rotacion_enu(lat_it, lon_it)
-            
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
             for c, r_sat in ref_sats.items():
                 r_data = sat_positions[r_sat]
-                rho_ref_r_base, _, dist_ref_r = calc_rho(r_data['sp'], X_iter, Y_iter, Z_iter)
-                rho_ref_b_base, _, _ = calc_rho(r_data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
+                dist_ref_r = math.sqrt((r_data['sp'][0]-X_iter)**2 + (r_data['sp'][1]-Y_iter)**2 + (r_data['sp'][2]-Z_iter)**2)
                 
                 ref_calcs[c] = {
                     'dist_ref_r': dist_ref_r,
-                    'SD_P_calc_ref': rho_ref_r_base - rho_ref_b_base,
+                    'SD_P_calc_ref': dist_ref_r - base_rho[r_sat],
                     'sp': r_data['sp'],
                     'el': r_data['el'],
                     'snr': r_data.get('snr', 30.0),
@@ -881,10 +891,9 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 data = sat_positions[s]
                 rc = ref_calcs[c]
                 
-                rho_i_r_base, _, dist_i_r = calc_rho(data['sp'], X_iter, Y_iter, Z_iter)
-                rho_i_b_base, _, _ = calc_rho(data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
+                dist_i_r = math.sqrt((data['sp'][0]-X_iter)**2 + (data['sp'][1]-Y_iter)**2 + (data['sp'][2]-Z_iter)**2)
                 
-                SD_P_calc_i = rho_i_r_base - rho_i_b_base
+                SD_P_calc_i = dist_i_r - base_rho[s]
                 DD_P_calc = SD_P_calc_i - rc['SD_P_calc_ref']
                 
                 u_i_ecef = [-(data['sp'][0] - X_iter) / dist_i_r, -(data['sp'][1] - Y_iter) / dist_i_r, -(data['sp'][2] - Z_iter) / dist_i_r]
@@ -895,14 +904,7 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 
                 dx_geom = [u_i_enu[0] - u_rc_enu[0], u_i_enu[1] - u_rc_enu[1], u_i_enu[2] - u_rc_enu[2]]
                 
-                el_rad_i = math.radians(data['el'])
-                el_rad_ref = math.radians(rc['el'])
-                snr_i = data.get('snr', 30.0)
-                snr_ref = rc.get('snr', 30.0)
-                factor_snr_i = min(1.0, max(0.1, snr_i / 40.0))
-                factor_snr_ref = min(1.0, max(0.1, snr_ref / 40.0))
-                w_P = (math.sin(el_rad_i) ** 2) * (math.sin(el_rad_ref) ** 2) * factor_snr_i * factor_snr_ref
-
+                w_P = w_P_cache[s]
                 DD_P_obs = data['sd_P'] - rc['sd_P']
                 res_P = DD_P_obs - DD_P_calc
                 
@@ -1021,28 +1023,38 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
         
         if len(sat_list) < 3: return None, "FAILED", None
         
-        def calc_rho(sp, X, Y, Z):
-            dist = math.sqrt((sp[0]-X)**2 + (sp[1]-Y)**2 + (sp[2]-Z)**2)
-            return dist, 0.0, dist
+        # Pre-calculos Trigonométricos Extraídos del Bucle
+        lat_init, lon_init, _ = ecef_a_geodesicas(X_iter, Y_iter, Z_iter)
+        R_enu = obtener_matriz_rotacion_enu(lat_init, lon_init)
+        
+        base_rho = {}
+        for s_key, s_data in sat_positions.items():
+            base_rho[s_key] = math.sqrt((s_data['sp'][0]-X_b_corr)**2 + (s_data['sp'][1]-Y_b_corr)**2 + (s_data['sp'][2]-Z_b_corr)**2)
+            
+        w_P_cache = {}
+        for i, s in enumerate(sat_list):
+            el_rad_i = math.radians(sat_positions[s]['el'])
+            el_rad_ref = math.radians(sat_positions[ref_sats[s[0]]]['el'])
+            snr_i = sat_positions[s].get('snr', 30.0)
+            snr_ref = sat_positions[ref_sats[s[0]]].get('snr', 30.0)
+            factor_snr_i = min(1.0, max(0.1, snr_i / 40.0))
+            factor_snr_ref = min(1.0, max(0.1, snr_ref / 40.0))
+            w_P_cache[s] = (math.sin(el_rad_i) ** 2) * (math.sin(el_rad_ref) ** 2) * factor_snr_i * factor_snr_ref
 
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
         for iteracion in range(8):
-            lat_it, lon_it, alt_it = ecef_a_geodesicas(X_iter, Y_iter, Z_iter)
-            R_enu = obtener_matriz_rotacion_enu(lat_it, lon_it)
-            
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
             for c, r_sat in ref_sats.items():
                 r_data = sat_positions[r_sat]
-                rho_ref_r_base, _, dist_ref_r = calc_rho(r_data['sp'], X_iter, Y_iter, Z_iter)
-                rho_ref_b_base, _, _ = calc_rho(r_data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
+                dist_ref_r = math.sqrt((r_data['sp'][0]-X_iter)**2 + (r_data['sp'][1]-Y_iter)**2 + (r_data['sp'][2]-Z_iter)**2)
                 
                 ref_calcs[c] = {
                     'dist_ref_r': dist_ref_r,
-                    'SD_P_calc_ref': rho_ref_r_base - rho_ref_b_base,
+                    'SD_P_calc_ref': dist_ref_r - base_rho[r_sat],
                     'sp': r_data['sp'],
                     'el': r_data['el'],
                     'snr': r_data.get('snr', 30.0),
@@ -1055,10 +1067,9 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 data = sat_positions[s]
                 rc = ref_calcs[c]
                 
-                rho_i_r_base, _, dist_i_r = calc_rho(data['sp'], X_iter, Y_iter, Z_iter)
-                rho_i_b_base, _, _ = calc_rho(data['sp'], X_b_corr, Y_b_corr, Z_b_corr)
+                dist_i_r = math.sqrt((data['sp'][0]-X_iter)**2 + (data['sp'][1]-Y_iter)**2 + (data['sp'][2]-Z_iter)**2)
                 
-                SD_P_calc_i = rho_i_r_base - rho_i_b_base
+                SD_P_calc_i = dist_i_r - base_rho[s]
                 DD_P_calc = SD_P_calc_i - rc['SD_P_calc_ref']
                 
                 u_i_ecef = [-(data['sp'][0] - X_iter) / dist_i_r, -(data['sp'][1] - Y_iter) / dist_i_r, -(data['sp'][2] - Z_iter) / dist_i_r]
@@ -1069,14 +1080,7 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 
                 dx_geom = [u_i_enu[0] - u_rc_enu[0], u_i_enu[1] - u_rc_enu[1], u_i_enu[2] - u_rc_enu[2]]
                 
-                el_rad_i = math.radians(data['el'])
-                el_rad_ref = math.radians(rc['el'])
-                snr_i = data.get('snr', 30.0)
-                snr_ref = rc.get('snr', 30.0)
-                factor_snr_i = min(1.0, max(0.1, snr_i / 40.0))
-                factor_snr_ref = min(1.0, max(0.1, snr_ref / 40.0))
-                w_P = (math.sin(el_rad_i) ** 2) * (math.sin(el_rad_ref) ** 2) * factor_snr_i * factor_snr_ref
-
+                w_P = w_P_cache[s]
                 DD_P_obs = data['sd_P'] - rc['sd_P']
                 res_P = DD_P_obs - DD_P_calc
                 
@@ -1626,12 +1630,11 @@ def tab3_calibrar():
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
             
-            step = max(1, total_eps // 160)
-            t_sample = t_sample_full[::step]
+            t_sample = t_sample_full  # [OPTIMIZACIÓN: Procesar TODAS las épocas sin límite de 160]
             
-            yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Determinista Activo:\n"
+            yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
             yield f"  [-] Épocas totales en archivo: {total_eps}\n"
-            yield f"  [-] Épocas estadísticas a evaluar: {len(t_sample)} (Criterio: 1 época tomada cada {step} épocas, límite exacto 160)\n"
+            yield f"  [-] Épocas estadísticas a evaluar: {len(t_sample)} (Límite 160 Desactivado)\n"
             
             yield "[PROGRESO] Fase 1: Extracción de Límites y Poblando Caché (Pre-Scan IRLS)...\n"
             coords_raw = []
@@ -1650,7 +1653,7 @@ def tab3_calibrar():
             
             deltas_h = sorted([math.hypot(c[0] - utm_n_r, c[1] - utm_e_r) for c in coords_raw])
             deltas_v = sorted([abs(c[2] - utm_c_r) for c in coords_raw])
-            idx_optimo = max(1, len(deltas_h) // 10)
+            idx_optimo = max(1, len(deltas_h) // 3)  # [OPTIMIZACIÓN: Percentil 33% para evitar amputación estadística masiva]
             best_eh = max(0.01, float(deltas_h[idx_optimo]) * 1.5)
             best_ev = max(0.01, float(deltas_v[idx_optimo]) * 1.5)
             
