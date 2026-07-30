@@ -283,8 +283,9 @@ def parse_rinex_obs_completo(path):
                     obs[tow][line[0:3].strip()] = data
     return obs
 
-def interpolar_base_a_rover(obs_base, tr, max_gap=2.0):
-    tiempos_base = sorted(list(obs_base.keys()), key=lambda k: obs_base[k].get('_meta', (0,0,0,0,0,0)))
+def interpolar_base_a_rover(obs_base, tr, max_gap=2.0, tiempos_base=None):
+    if tiempos_base is None:
+        tiempos_base = sorted(list(obs_base.keys()), key=lambda k: obs_base[k].get('_meta', (0,0,0,0,0,0)))
     if not tiempos_base: return None
     
     exact_idx = min(range(len(tiempos_base)), key=lambda i: abs(tiempos_base[i] - tr))
@@ -1431,12 +1432,14 @@ def tab1_homogenizar():
             base_sinc, rover_sinc = {}, {}
             total_epochs = len(rover_raw_dict)
             c = 0
+            tiempos_base_preordenados = sorted(list(base_raw_dict.keys()), key=lambda k: base_raw_dict[k].get('_meta', (0,0,0,0,0,0)))
+            
             for tr in sorted(list(rover_raw_dict.keys()), key=lambda k: rover_raw_dict[k].get('_meta', (0,0,0,0,0,0))):
                 c += 1
                 if total_epochs > 0 and c % max(1, total_epochs // 10) == 0: 
                     yield f"[PROGRESO] Cotejando épocas con interpolación dinámica flexible (max_gap=2.0s)... {int((c / float(total_epochs)) * 100.0)}%\n"
                 
-                base_interp = interpolar_base_a_rover(base_raw_dict, tr, max_gap=2.0)
+                base_interp = interpolar_base_a_rover(base_raw_dict, tr, max_gap=2.0, tiempos_base=tiempos_base_preordenados)
                 
                 if base_interp:
                     base_sinc[tr] = base_interp
@@ -1660,8 +1663,8 @@ def tab3_calibrar():
             best_params = {}
             
             m_center, m_span = 3.5, 1.5
-            cp_center, cp_span = 2.0, 1.0
-            ca_center, ca_span = 2.0, 1.0
+            cp_center, cp_span = 2.5, 0.5
+            ca_center, ca_span = 2.5, 0.5
             
             def get_local_median(lst):
                 s = sorted(lst); n = len(s)
@@ -1674,8 +1677,8 @@ def tab3_calibrar():
                 yield f"  [+] Refinando espacio de búsqueda libre (Zoom {nivel+1}/{p_iter})...\n"
                 
                 m_grid = [max(0.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
-                cp_grid = [max(0.1, x) for x in [cp_center - cp_span, cp_center, cp_center + cp_span]]
-                ca_grid = [max(0.1, x) for x in [ca_center - ca_span, ca_center, ca_center + ca_span]]
+                cp_grid = [max(2.0, x) for x in [cp_center - cp_span, cp_center, cp_center + cp_span]]
+                ca_grid = [max(2.0, x) for x in [ca_center - ca_span, ca_center, ca_center + ca_span]]
                 
                 nivel_best_rmse = float('inf')
                 nivel_best_params = {}
@@ -1849,8 +1852,10 @@ def tab4_procesar():
             
             rover_tows = sorted(list(obs_r_raw.keys()), key=lambda k: obs_r_raw[k].get('_meta', (0,0,0,0,0,0)))
             obs_b_sync = {}
+            tiempos_base_preordenados = sorted(list(obs_b_raw.keys()), key=lambda k: obs_b_raw[k].get('_meta', (0,0,0,0,0,0)))
+            
             for tr in rover_tows:
-                base_interp = interpolar_base_a_rover(obs_b_raw, tr, max_gap=p_max_gap)
+                base_interp = interpolar_base_a_rover(obs_b_raw, tr, max_gap=p_max_gap, tiempos_base=tiempos_base_preordenados)
                 if base_interp:
                     obs_b_sync[tr] = base_interp
                     obs_b_sync[tr]['_meta'] = obs_r_raw[tr]['_meta']
