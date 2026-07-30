@@ -828,7 +828,7 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 
             if sp_r:
                 el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_iter, Y_iter, Z_iter)
-                if el_r >= max(10.0, mask_angle):  # [OPTIMIZACIÓN: Piso mínimo de 10.0° para mitigar multitrayecto horizontal]
+                if el_r >= max(8.0, mask_angle):  # [OPTIMIZACIÓN: Piso intermedio de 8.0° para equilibrar 2D y 1D]
                     sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': d.get('snr', 30.0)}
         
         if len(sat_positions) < 4: return None, "FAILED", None
@@ -1003,7 +1003,7 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 
             if sp_r:
                 el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_iter, Y_iter, Z_iter)
-                if el_r >= max(10.0, mask_angle):  # [OPTIMIZACIÓN: Piso mínimo de 10.0° para mitigar multitrayecto horizontal]
+                if el_r >= max(8.0, mask_angle):  # [OPTIMIZACIÓN: Piso intermedio de 8.0° para equilibrar 2D y 1D]
                     sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': d.get('snr', 30.0)}
         
         if len(sat_positions) < 4: return None, "FAILED", None
@@ -1637,8 +1637,8 @@ def tab3_calibrar():
             coords_raw = []
             for t in t_sample:
                 if os.path.exists(flag_file): break
-                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 10.0, geom_cache=geom_cache)
-                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 10.0, geom_cache=geom_cache)
+                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
+                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
                 
                 if sem:
                     la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
@@ -1662,7 +1662,7 @@ def tab3_calibrar():
             best_rmse = float('inf')
             best_params = {}
             
-            m_center, m_span = 12.0, 2.0  # [OPTIMIZACIÓN: Elevar piso base de máscara a 12° para purificar multitrayecto horizontal]
+            m_center, m_span = 8.0, 2.0  # [OPTIMIZACIÓN: Piso óptimo intermedio en 8.0° para balancear 2D y 1D]
             cp_center, cp_span = 2.5, 0.5
             ca_center, ca_span = 2.5, 0.5
             
@@ -1676,7 +1676,7 @@ def tab3_calibrar():
                 if time_out or os.path.exists(flag_file): break
                 yield f"  [+] Refinando espacio de búsqueda libre (Zoom {nivel+1}/{p_iter})...\n"
                 
-                m_grid = [max(10.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
+                m_grid = [max(6.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
                 cp_grid = [max(2.0, x) for x in [cp_center - cp_span, cp_center, cp_center + cp_span]]
                 ca_grid = [max(2.0, x) for x in [ca_center - ca_span, ca_center, ca_center + ca_span]]
                 
@@ -1691,7 +1691,6 @@ def tab3_calibrar():
                         time_out = True
                         break
 
-                    # [OPTIMIZACIÓN MAESTRA: Uso de caché de coordenadas del Pre-Scan para evitar cálculo satelital repetido en bucles]
                     coords = []
                     for t in t_sample:
                         if os.path.exists(flag_file): break
@@ -1807,7 +1806,7 @@ def tab4_procesar():
     h_r_nuevo = safe_f(request.form.get('altura_rover_nuevo'), 0.0)
     
     if p_mask is None or utm_n is None:
-        return Response("> [ERROR FATAL] Parámetros o coordenadas no encontrados. Ejecute la Pestaña 3 primero.\n", mimetype='text/plain')
+        return Response("> [ERROR FATAL] Parámetros or coordenadas no encontrados. Ejecute la Pestaña 3 primero.\n", mimetype='text/plain')
 
     if not url_rover_nuevo or url_rover_nuevo.strip() == '': 
         return Response("> [ERROR] Falta el enlace de Drive del nuevo archivo RINEX Rover.\n", mimetype='text/plain')
