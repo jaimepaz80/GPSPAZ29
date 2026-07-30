@@ -283,7 +283,7 @@ def parse_rinex_obs_completo(path):
                     obs[tow][line[0:3].strip()] = data
     return obs
 
-def interpolar_base_a_rover(obs_base, tr, max_gap=2.0, tiempos_base=None):
+def interpolar_base_a_rover(obs_base, tr, max_gap=0.5, tiempos_base=None):
     if tiempos_base is None:
         tiempos_base = sorted(list(obs_base.keys()), key=lambda k: obs_base[k].get('_meta', (0,0,0,0,0,0)))
     if not tiempos_base: return None
@@ -828,7 +828,7 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 
             if sp_r:
                 el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_iter, Y_iter, Z_iter)
-                if el_r >= max(8.0, mask_angle):  # [OPTIMIZACIÓN: Piso intermedio de 8.0° para equilibrar 2D y 1D]
+                if el_r >= mask_angle:  # [RESTAURADO: Valor base de máscara original de 5.0° para priorizar la cota vertical de 12.4 cm]
                     sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': d.get('snr', 30.0)}
         
         if len(sat_positions) < 4: return None, "FAILED", None
@@ -1003,7 +1003,7 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 
             if sp_r:
                 el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_iter, Y_iter, Z_iter)
-                if el_r >= max(8.0, mask_angle):  # [OPTIMIZACIÓN: Piso intermedio de 8.0° para equilibrar 2D y 1D]
+                if el_r >= mask_angle:  # [RESTAURADO: Valor base de máscara original de 5.0° para priorizar la cota vertical de 12.4 cm]
                     sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': d.get('snr', 30.0)}
         
         if len(sat_positions) < 4: return None, "FAILED", None
@@ -1427,7 +1427,7 @@ def tab1_homogenizar():
             rover_raw_dict = parse_rinex_obs_completo(p_r_raw)
             
             yield "> [ENRUTADOR] Evaluando calidad y señales RINEX...\n"
-            modo_str, ratio, msg = analizar_calidad_y_senales_rinex(base_raw_dict, rover_raw_dict, modo_hardware=modo_hardware, max_gap_tolerado=2.0)
+            modo_str, ratio, msg = analizar_calidad_y_senales_rinex(base_raw_dict, rover_raw_dict, modo_hardware=modo_hardware, max_gap_tolerado=0.5)
             yield f"  [-] Módulo pre-asignado: {modo_str}\n"
             yield f"  [-] Justificación: {msg}\n\n"
             
@@ -1439,9 +1439,9 @@ def tab1_homogenizar():
             for tr in sorted(list(rover_raw_dict.keys()), key=lambda k: rover_raw_dict[k].get('_meta', (0,0,0,0,0,0))):
                 c += 1
                 if total_epochs > 0 and c % max(1, total_epochs // 10) == 0: 
-                    yield f"[PROGRESO] Cotejando épocas con interpolación dinámica flexible (max_gap=2.0s)... {int((c / float(total_epochs)) * 100.0)}%\n"
+                    yield f"[PROGRESO] Cotejando épocas con interpolación dinámica flexible (max_gap=0.5s)... {int((c / float(total_epochs)) * 100.0)}%\n"
                 
-                base_interp = interpolar_base_a_rover(base_raw_dict, tr, max_gap=2.0, tiempos_base=tiempos_base_preordenados)
+                base_interp = interpolar_base_a_rover(base_raw_dict, tr, max_gap=0.5, tiempos_base=tiempos_base_preordenados)
                 
                 if base_interp:
                     base_sinc[tr] = base_interp
@@ -1583,9 +1583,9 @@ def tab3_calibrar():
     h_r = safe_f(leer_estado(uid, 'altura_rover'), 0.0)
     modo_hardware = leer_estado(uid, 'modo_hardware') or 'iguales'
 
-    p_max_gap = safe_f(request.form.get('param_max_gap'), 2.0)
+    p_max_gap = safe_f(request.form.get('param_max_gap'), 0.5)
     p_snr = safe_f(request.form.get('param_snr'), 25.0)
-    p_iter = max(1, safe_i(request.form.get('param_iter'), 3))
+    p_iter = max(1, safe_i(request.form.get('param_iter'), 6))
 
     def procesar():
         try:
@@ -1637,8 +1637,8 @@ def tab3_calibrar():
             coords_raw = []
             for t in t_sample:
                 if os.path.exists(flag_file): break
-                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
-                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
+                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 5.0, geom_cache=geom_cache)
+                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 5.0, geom_cache=geom_cache)
                 
                 if sem:
                     la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
@@ -1662,9 +1662,9 @@ def tab3_calibrar():
             best_rmse = float('inf')
             best_params = {}
             
-            m_center, m_span = 8.0, 2.0  # [OPTIMIZACIÓN: Piso óptimo intermedio en 8.0° para balancear 2D y 1D]
-            cp_center, cp_span = 2.5, 0.5
-            ca_center, ca_span = 2.5, 0.5
+            m_center, m_span = 10.0, 5.0     # [RESTAURADO: Centro 10.0°, Span 5.0°]
+            cp_center, cp_span = 2.0, 1.5    # [RESTAURADO: Centro 2.0 Sigma, Span 1.5 Sigma]
+            ca_center, ca_span = 2.0, 1.5    # [RESTAURADO: Centro 2.0 Sigma, Span 1.5 Sigma]
             
             def get_local_median(lst):
                 s = sorted(lst); n = len(s)
@@ -1676,9 +1676,9 @@ def tab3_calibrar():
                 if time_out or os.path.exists(flag_file): break
                 yield f"  [+] Refinando espacio de búsqueda libre (Zoom {nivel+1}/{p_iter})...\n"
                 
-                m_grid = [max(6.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
-                cp_grid = [max(2.0, x) for x in [cp_center - cp_span, cp_center, cp_center + cp_span]]
-                ca_grid = [max(2.0, x) for x in [ca_center - ca_span, ca_center, ca_center + ca_span]]
+                m_grid = [max(0.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
+                cp_grid = [max(0.1, x) for x in [cp_center - cp_span, cp_center, cp_center + cp_span]]
+                ca_grid = [max(0.1, x) for x in [ca_center - ca_span, ca_center, ca_center + ca_span]]
                 
                 nivel_best_rmse = float('inf')
                 nivel_best_params = {}
@@ -1798,12 +1798,12 @@ def tab4_procesar():
     p_ca = safe_f(leer_estado(uid, 'opt_ca'), 2.0)
     err_hor_max = safe_f(leer_estado(uid, 'opt_eh'), 0.0)
     err_ver_max = safe_f(leer_estado(uid, 'opt_ev'), 0.0)
-    p_max_gap = safe_f(leer_estado(uid, 'opt_max_gap'), 2.0)
+    p_max_gap = safe_f(leer_estado(uid, 'opt_max_gap'), 0.5)
     estrategia = leer_estado(uid, 'estrategia_activa') or "MODO_D_DGPS"
 
     url_rover_nuevo = request.form.get('url_rover_nuevo')
     nombre_medido = request.form.get('nombre_medido', 'PUNTO_DESCONOCIDO')
-    h_r_nuevo = safe_f(request.form.get('altura_rover_nuevo'), 0.0)
+    h_r_nuevo = safe_f(leer_estado(uid, 'altura_rover_nuevo'), 0.0)
     
     if p_mask is None or utm_n is None:
         return Response("> [ERROR FATAL] Parámetros or coordenadas no encontrados. Ejecute la Pestaña 3 primero.\n", mimetype='text/plain')
