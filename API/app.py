@@ -1472,7 +1472,7 @@ def tab1_homogenizar():
             yield generar_informe_homogeneizacion_detallado(id_b, id_r, base_raw_dict, rover_raw_dict, rover_sinc, modo_str, msg, c_base, c_rover, t_exec)
             yield "\n[SUCCESS]"
         except Exception as e: yield f"\n> [ERROR] Falla estructural: {str(e)}"
-    return Response(procesar(), mimetype='text/plain')
+    return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
 
 @app.route('/API/tab2_efemerides', methods=['POST'])
 def tab2_efemerides():
@@ -1558,7 +1558,7 @@ def tab2_efemerides():
         except Exception as e:
             yield f"\n> [ERROR FATAL] Fallo en descarga automática NAV: {str(e)}\n"
 
-    return Response(procesar(), mimetype='text/plain')
+    return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
 
 @app.route('/API/tab3_calibrar', methods=['POST'])
 def tab3_calibrar():
@@ -1775,7 +1775,7 @@ def tab3_calibrar():
             else:
                 yield "\n> [ERROR] El modelo no convergió. Filtros demasiado agresivos o Timeout temprano.\n"
         except Exception as e: yield f"\n> [ERROR FATAL] {str(e)}"
-    return Response(procesar(), mimetype='text/plain')
+    return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
 
 @app.route('/API/tab4_procesar', methods=['POST'])
 def tab4_procesar():
@@ -1927,7 +1927,7 @@ def tab4_procesar():
             yield generar_informe_ascii("MEDICION", p_dict)
             yield "\n[SUCCESS]"
         except Exception as e: yield f"\n> [ERROR FATAL] {str(e)}"
-    return Response(procesar(), mimetype='text/plain')
+    return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=6000, debug=True)
