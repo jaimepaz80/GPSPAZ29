@@ -1324,12 +1324,12 @@ def generar_informe_ascii_dual(p_dict):
 
 [2] AUDITORÍA DE MOTORES INDEPENDIENTES
 ------------------------------------------------------------------------
-  >>> MOTOR ALTIMÉTRICO (V1 - Elevación Libre)
+  >>> MOTOR ALTIMÉTRICO (V1 - Elevación Libre con Máscara Forzada 15.0°)
       * Filtros aplicados  : {f_14(p_dict['cp'])} Sigma (Plani) | {f_14(p_dict['ca'])} Sigma (Alti)
-      * Tolerancias límite : H={f_14(p_dict['err_h'])}m | V={f_14(p_dict['err_v'])}m
-      * Acción Ejecutada   : Cero calibración inyectada (Protección Troposférica).
+      * Máscara Elevación  : 15.0° (Protección Troposférica estricta para Vector Z)
+      * Acción Ejecutada   : Cero calibración inyectada.
       
-  >>> MOTOR PLANIMÉTRICO (V6 - Ajuste de Red)
+  >>> MOTOR PLANIMÉTRICO (V6 - Ajuste de Red con Máscara Optimizada)
       * Vector Absorbido   : Shift_N={f_14(p_dict['shift_n_aplicado'])}m | Shift_E={f_14(p_dict['shift_e_aplicado'])}m
       * Acción Ejecutada   : Traslación determinista de Matriz de Covarianza.
 
@@ -1343,7 +1343,7 @@ def generar_informe_ascii_dual(p_dict):
   * COORDENADA MÓVIL CALCULADA:
       Norte : {f_14(p_dict['r_n_calc'])} m  (Procesado por V6)
       Este  : {f_14(p_dict['r_e_calc'])} m  (Procesado por V6)
-      Cota  : {f_14(p_dict['r_z_calc'])} m  (Procesado por V1)
+      Cota  : {f_14(p_dict['r_z_calc'])} m  (Procesado por V1 con 15.0°)
 ========================================================================
 """
     return informe
@@ -1816,7 +1816,9 @@ def tab4_procesar_v1():
     h_b = safe_f(leer_estado(uid, 'altura_base'), 0.0)
     modo_hardware = leer_estado(uid, 'modo_hardware') or 'iguales'
     
-    p_mask = safe_f(leer_estado(uid, 'opt_mask'), 3.5)
+    # [MODIFICACIÓN QUIRÚRGICA V1]: Forzar máscara estricta a 15.0° para neutralizar tropósfera en eje Z
+    p_mask = 15.0 
+    
     p_cp = safe_f(leer_estado(uid, 'opt_cp'), 2.0)
     p_ca = safe_f(leer_estado(uid, 'opt_ca'), 2.0)
     err_hor_max = safe_f(leer_estado(uid, 'opt_eh'), 0.0)
@@ -1829,7 +1831,7 @@ def tab4_procesar_v1():
 
     def procesar():
         try:
-            yield "> [SISTEMA] Iniciando Motor V1 (Aislamiento Altimétrico)...\n"
+            yield "> [SISTEMA] Iniciando Motor V1 (Aislamiento Altimétrico con Máscara Forzada 15.0°)...\n"
             yield "> [RED] Descargando Nuevo RINEX Rover...\n"
             descargar_desde_gdrive(url_rover_nuevo, p_r_nuevo)
             
@@ -1880,7 +1882,7 @@ def tab4_procesar_v1():
             guardar_estado(uid, 'v1_cota_aislada', zf_final_ground)
             guardar_estado(uid, 'v1_tiempo_cpu', time.time() - start_time)
             
-            yield f"  [-] Cota calculada sin Shift: {f_14(zf_final_ground)} m\n"
+            yield f"  [-] Cota calculada con Máscara 15.0° (V1): {f_14(zf_final_ground)} m\n"
             yield "\n[ÉXITO PASO 1] Motor V1 en espera. Proceda a Planimetría V6."
         except Exception as e: yield f"\n> [ERROR FATAL V1] {str(e)}"
     return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
