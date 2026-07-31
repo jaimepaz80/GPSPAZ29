@@ -842,13 +842,8 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         
         if len(sat_positions) < 4: return None, "FAILED", None
         
-        # [MODIFICACIÓN QUIRÚRGICA: Truncamiento Heurístico (Top 12 Sats)]
-        sorted_sats = sorted(
-            sat_positions.keys(), 
-            key=lambda k: sat_positions[k].get('snr', 30.0) * math.sin(math.radians(sat_positions[k]['el'])), 
-            reverse=True
-        )
-        sat_list_full = sorted_sats[:12]
+        # [OPTIMIZACIÓN OR: Uso del 100% del espectro satelital para restaurar PDOP Vertical (Cota)]
+        sat_list_full = list(sat_positions.keys())
         
         constellations = set([s[0] for s in sat_list_full])
         ref_sats = {}
@@ -880,8 +875,9 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [MODIFICACIÓN QUIRÚRGICA: Límite estricto a 4 iteraciones]
-        for iteracion in range(4):
+        # [OPTIMIZACIÓN OR: Techo restaurado. Se confía en el freno dinámico de 1cm 
+        # y en el freno maestro de 28.5s para permitir convergencias profundas (iter 5 o 6)]
+        for iteracion in range(8):
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
@@ -1032,13 +1028,8 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         
         if len(sat_positions) < 4: return None, "FAILED", None
         
-        # [MODIFICACIÓN QUIRÚRGICA: Truncamiento Heurístico (Top 12 Sats)]
-        sorted_sats = sorted(
-            sat_positions.keys(), 
-            key=lambda k: sat_positions[k].get('snr', 30.0) * math.sin(math.radians(sat_positions[k]['el'])), 
-            reverse=True
-        )
-        sat_list_full = sorted_sats[:12]
+        # [OPTIMIZACIÓN OR: Uso del 100% del espectro satelital para restaurar PDOP Vertical (Cota)]
+        sat_list_full = list(sat_positions.keys())
         
         constellations = set([s[0] for s in sat_list_full])
         ref_sats = {}
@@ -1070,8 +1061,9 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [MODIFICACIÓN QUIRÚRGICA: Límite estricto a 4 iteraciones]
-        for iteracion in range(4):
+        # [OPTIMIZACIÓN OR: Techo restaurado. Se confía en el freno dinámico de 1cm 
+        # y en el freno maestro de 28.5s para permitir convergencias profundas (iter 5 o 6)]
+        for iteracion in range(8):
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
@@ -1659,8 +1651,9 @@ def tab3_calibrar():
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
             
-            # [MODIFICACIÓN QUIRÚRGICA: Muestreo del 100% de la data sin límite]
-            t_sample = t_sample_full 
+            # [OPTIMIZACIÓN OR: "Algoritmo Goloso". Se ordena por densidad, procesando todo. 
+            # El freno de mano (28s) actuará como un discriminador de calidad dinámico.]
+            t_sample = sorted(t_sample_full, key=lambda t: len(sd_suavizada[t]), reverse=True) 
             
             yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
             yield f"  [-] Épocas totales en archivo: {total_eps}\n"
@@ -1669,8 +1662,10 @@ def tab3_calibrar():
             yield "[PROGRESO] Fase 1: Extracción de Límites y Poblando Caché (Pre-Scan IRLS)...\n"
             coords_raw = []
             for t in t_sample:
-                if time.time() - start_time > 28.0:
-                    yield "\n> [ALERTA] Freno de mano de 28.0s activado. Abortando Fase 1 para evitar timeout de Render.\n"
+                # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.
+                # Rescata la lista 'coords' acumulada en lugar de descartarla.]
+                if time.time() - start_time > 28.5:
+                    yield "\n> [ALERTA] Freno de mano de 28.5s activado. Abortando Fase 1 para evitar timeout de Render.\n"
                     break
                 if os.path.exists(flag_file): break
                 
@@ -1699,7 +1694,6 @@ def tab3_calibrar():
             best_rmse = float('inf')
             best_params = {}
             
-            # [MODIFICACIÓN QUIRÚRGICA: Centro Máscara en 12.0° y Piso en 10.0°]
             m_center, m_span = 12.0, 5.0  
             cp_center, cp_span = 2.0, 1.5 
             ca_center, ca_span = 2.0, 1.5 
@@ -1726,7 +1720,9 @@ def tab3_calibrar():
                     
                     coords = []
                     for t in t_sample:
-                        if time.time() - start_time > 28.0:
+                        # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.
+                        # Rescata la lista 'coords' acumulada en lugar de descartarla.]
+                        if time.time() - start_time > 28.5:
                             time_out = True
                             break
                         if os.path.exists(flag_file): break
@@ -1894,8 +1890,8 @@ def tab4_procesar():
             tiempos_base_preordenados = sorted(list(obs_b_raw.keys()), key=lambda k: obs_b_raw[k].get('_meta', (0,0,0,0,0,0)))
             
             for tr in rover_tows:
-                if time.time() - start_time > 28.0:
-                    yield "\n> [ALERTA] Freno de mano de 28.0s activado. Abortando interpolación para evitar timeout...\n"
+                if time.time() - start_time > 28.5:
+                    yield "\n> [ALERTA] Freno de mano de 28.5s activado. Abortando interpolación para evitar timeout...\n"
                     break
                 base_interp = interpolar_base_a_rover(obs_b_raw, tr, max_gap=p_max_gap, tiempos_base=tiempos_base_preordenados)
                 if base_interp:
@@ -1913,8 +1909,8 @@ def tab4_procesar():
             for t in sd_suavizada:
                 c += 1
                 
-                if time.time() - start_time > 28.0:
-                    yield "\n> [ALERTA] Freno de mano de 28.0s alcanzado. Generando informe con las épocas procesadas hasta el momento...\n"
+                if time.time() - start_time > 28.5:
+                    yield "\n> [ALERTA] Freno de mano de 28.5s alcanzado. Generando informe con las épocas procesadas hasta el momento...\n"
                     break
 
                 if c % max(1, t_eps // 10) == 0: yield f"[PROGRESO] Resolviendo Matrices IRLS DGPS (ENU)... {int((c / float(t_eps)) * 100.0)}%\n"
