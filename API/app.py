@@ -1648,7 +1648,8 @@ def tab3_calibrar():
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
             
-            # [MODIFICACIÓN QUIRÚRGICA: Orden cronológico estricto.]
+            # [MODIFICACIÓN QUIRÚRGICA: Orden cronológico estricto. Se anula la alteración por densidad 
+            # para preservar la correlación temporal de los sesgos atmosféricos.]
             t_sample = t_sample_full 
             
             yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
@@ -1689,7 +1690,6 @@ def tab3_calibrar():
             best_rmse = float('inf')
             best_params = {}
             
-            # [OPTIMIZACIÓN OR: Máscara inicial elevada a 15.0 para mitigar tropósfera (Cota)]
             m_center, m_span = 15.0, 5.0  
             cp_center, cp_span = 2.0, 1.5 
             ca_center, ca_span = 2.0, 1.5 
@@ -1708,7 +1708,6 @@ def tab3_calibrar():
                 nivel += 1
                 yield f"  [+] Refinando espacio de búsqueda libre (Zoom {nivel}/∞)...\n"
                 
-                # Piso de máscara restaurado a 12.0 para blindar el vector Z
                 m_grid = [max(12.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
                 cp_grid = [max(2.0, x) for x in [cp_center - cp_span, cp_center, cp_center + cp_span]]
                 ca_grid = [max(2.0, x) for x in [ca_center - ca_span, ca_center, ca_center + ca_span]]
@@ -1721,7 +1720,6 @@ def tab3_calibrar():
                     
                     coords = []
                     for t in t_sample:
-                        # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.]
                         if time.time() - start_time > 28.5:
                             time_out = True
                             break
@@ -1757,7 +1755,7 @@ def tab3_calibrar():
                                 if rmse_3d < global_best_score:
                                     global_best_score = rmse_3d
                                     best_rmse = rmse_3d
-                                    best_params = {'mask': float(m), 'cp': float(cp), 'ca': float(ca), 'eh': float(best_eh), 'ev': float(best_ev), 'max_gap': float(p_max_gap), 'snr': float(p_snr), 'rmse': float(rmse_3d), 'ret': int(ret)}
+                                    best_params = {'mask': float(m), 'cp': float(cp), 'ca': float(ca), 'eh': float(best_eh), 'ev': float(best_ev), 'max_gap': float(p_max_gap), 'snr': float(p_snr), 'rmse': float(rmse_3d), 'ret': int(ret), 'nf': float(nf), 'ef': float(ef), 'zf': float(zf)}
                 
                 if nivel_best_rmse != float('inf') and not time_out:
                     yield f"  [*] Fin Iteración {nivel} | Mejor RMSE Local: {f_14(nivel_best_params['rmse'])} m\n"
@@ -1783,6 +1781,15 @@ def tab3_calibrar():
                 guardar_estado(uid, 'opt_snr', float(best_params.get('snr', p_snr)))
                 guardar_estado(uid, 'opt_eh', float(best_params['eh']))
                 guardar_estado(uid, 'opt_ev', float(best_params['ev']))
+                
+                # [MODIFICACIÓN QUIRÚRGICA: Cálculo determinista del Vector de Calibración Local]
+                shift_n = utm_n_r - float(best_params['nf'])
+                shift_e = utm_e_r - float(best_params['ef'])
+                shift_z = utm_c_r - (float(best_params['zf']) - h_r)
+                
+                guardar_estado(uid, 'shift_n', shift_n)
+                guardar_estado(uid, 'shift_e', shift_e)
+                guardar_estado(uid, 'shift_z', shift_z)
                 
                 guardar_estado(uid, 'estrategia_activa', modo_str)
                 
@@ -1936,9 +1943,14 @@ def tab4_procesar():
                 
             nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res_estadistica
             
-            nf_final = float(nf)
-            ef_final = float(ef)
-            zf_final_ground = float(zf) - h_r_nuevo
+            # [MODIFICACIÓN QUIRÚRGICA: Absorción del Vector de Calibración Local]
+            shift_n = safe_f(leer_estado(uid, 'shift_n'), 0.0)
+            shift_e = safe_f(leer_estado(uid, 'shift_e'), 0.0)
+            shift_z = safe_f(leer_estado(uid, 'shift_z'), 0.0)
+            
+            nf_final = float(nf) + shift_n
+            ef_final = float(ef) + shift_e
+            zf_final_ground = float(zf) - h_r_nuevo + shift_z
             
             exec_time = time.time() - start_time
             
@@ -1961,7 +1973,7 @@ def tab4_procesar():
                 'r_n_calc': float(nf_final), 'r_e_calc': float(ef_final), 'r_z_calc': float(zf_final_ground),
                 'utm_h': int(utm_h), 'utm_hem': str(utm_hem),
                 'estrategia': str(estrategia),
-                'shift_applied': False,
+                'shift_applied': True,
                 't_exec': float(exec_time)
             }
             
