@@ -782,30 +782,39 @@ def aislar_diferencias_MODO_D(obs_b, obs_r):
 # =====================================================================
 # VÍA 1 -> MÓDULO B: MOTOR IRLS ASINCRÓNICO CON PROYECCIÓN ENU RIGUROSA
 # =====================================================================
-def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom_cache=None):
+def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_snr=18.5, geom_cache=None):
     try:
         tow_b = sd_epoca.get('_tow_b', tr)
         y_m, m_m, d_m, h_m, mn_m, sec_m = sd_epoca['_meta']
         
-        if geom_cache is not None and tr in geom_cache and 'tide' in geom_cache[tr]:
-            dx_tide, dy_tide, dz_tide = geom_cache[tr]['tide']
+        if geom_cache is not None and 'tide' in geom_cache:
+            dx_tide, dy_tide, dz_tide = geom_cache['tide']
         else:
             dx_tide, dy_tide, dz_tide = correccion_mareas_solidas(X_b, Y_b, Z_b, tow_b, y_m, m_m, d_m)
             if geom_cache is not None:
                 if tr not in geom_cache: geom_cache[tr] = {}
-                geom_cache[tr]['tide'] = (dx_tide, dy_tide, dz_tide)
+                geom_cache['tide'] = (dx_tide, dy_tide, dz_tide)
         
         X_b_corr, Y_b_corr, Z_b_corr = X_b + dx_tide, Y_b + dy_tide, Z_b + dz_tide
-        
         X_iter, Y_iter, Z_iter = X_b_corr, Y_b_corr, Z_b_corr 
         
+        # [MODIFICACIÓN QUIRÚRGICA: Matriz ENU estática en caché base X_b_corr]
+        if geom_cache is not None and 'R_enu' in geom_cache:
+            R_enu = geom_cache['R_enu']
+        else:
+            lat_init, lon_init, _ = ecef_a_geodesicas(X_b_corr, Y_b_corr, Z_b_corr)
+            R_enu = obtener_matriz_rotacion_enu(lat_init, lon_init)
+            if geom_cache is not None: geom_cache['R_enu'] = R_enu
+
         sat_positions = {}
         for s, d in sd_epoca.items():
             if s == '_meta' or s == '_tow_b' or d['sd_P'] is None: continue 
             
-            sp_r = None
+            sp_r = None; el_r = 0.0; az_r = 0.0
             if geom_cache is not None and tr in geom_cache and s in geom_cache[tr]:
                 sp_r = geom_cache[tr][s]['sp_r']
+                el_r = geom_cache[tr][s]['el']
+                az_r = geom_cache[tr][s]['az']
             else:
                 tau_r = d['pr_r'] / C_LIGHT
                 t_emision_r = tr - tau_r
@@ -821,15 +830,18 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 if not sp_r:
                     sp_r = calcular_posicion_satelite_wgs84(seleccionar_efemeride_optima(nav.get(s), t_emision_r), t_emision_r, tau_r, s[0])
                     
-                if geom_cache is not None:
-                    if tr not in geom_cache: geom_cache[tr] = {}
-                    if s not in geom_cache[tr]: geom_cache[tr][s] = {}
-                    geom_cache[tr][s]['sp_r'] = sp_r
+                if sp_r:
+                    # [MODIFICACIÓN QUIRÚRGICA: Topocéntricas ancladas en X_b_corr (1 solo cálculo)]
+                    el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_b_corr, Y_b_corr, Z_b_corr)
+                    if geom_cache is not None:
+                        if tr not in geom_cache: geom_cache[tr] = {}
+                        geom_cache[tr][s] = {'sp_r': sp_r, 'el': el_r, 'az': az_r}
                 
             if sp_r:
-                el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_iter, Y_iter, Z_iter)
-                if el_r >= max(8.0, mask_angle):  # [OPTIMIZACIÓN: Piso intermedio de 8.0° para equilibrar 2D y 1D]
-                    sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': d.get('snr', 30.0)}
+                # [MODIFICACIÓN QUIRÚRGICA: Integración piso SNR Dinámico]
+                snr_val = d.get('snr', 30.0)
+                if el_r >= max(8.0, mask_angle) and snr_val >= min_snr:
+                    sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': snr_val}
         
         if len(sat_positions) < 4: return None, "FAILED", None
         
@@ -846,9 +858,6 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 sat_list.extend(c_sats)
         
         if len(sat_list) < 3: return None, "FAILED", None
-        
-        lat_init, lon_init, _ = ecef_a_geodesicas(X_iter, Y_iter, Z_iter)
-        R_enu = obtener_matriz_rotacion_enu(lat_init, lon_init)
         
         base_rho = {}
         for s_key, s_data in sat_positions.items():
@@ -957,30 +966,39 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
 # =====================================================================
 # VÍA 2 -> MÓDULO D: NUEVO MOTOR DGPS ESTRICTO CÓDIGO PURO CON ENU
 # =====================================================================
-def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom_cache=None):
+def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_snr=18.5, geom_cache=None):
     try:
         tow_b = sd_epoca.get('_tow_b', tr)
         y_m, m_m, d_m, h_m, mn_m, sec_m = sd_epoca['_meta']
         
-        if geom_cache is not None and tr in geom_cache and 'tide' in geom_cache[tr]:
-            dx_tide, dy_tide, dz_tide = geom_cache[tr]['tide']
+        if geom_cache is not None and 'tide' in geom_cache:
+            dx_tide, dy_tide, dz_tide = geom_cache['tide']
         else:
             dx_tide, dy_tide, dz_tide = correccion_mareas_solidas(X_b, Y_b, Z_b, tow_b, y_m, m_m, d_m)
             if geom_cache is not None:
                 if tr not in geom_cache: geom_cache[tr] = {}
-                geom_cache[tr]['tide'] = (dx_tide, dy_tide, dz_tide)
+                geom_cache['tide'] = (dx_tide, dy_tide, dz_tide)
                 
         X_b_corr, Y_b_corr, Z_b_corr = X_b + dx_tide, Y_b + dy_tide, Z_b + dz_tide
-        
         X_iter, Y_iter, Z_iter = X_b_corr, Y_b_corr, Z_b_corr 
+        
+        # [MODIFICACIÓN QUIRÚRGICA: Matriz ENU estática en caché base X_b_corr]
+        if geom_cache is not None and 'R_enu' in geom_cache:
+            R_enu = geom_cache['R_enu']
+        else:
+            lat_init, lon_init, _ = ecef_a_geodesicas(X_b_corr, Y_b_corr, Z_b_corr)
+            R_enu = obtener_matriz_rotacion_enu(lat_init, lon_init)
+            if geom_cache is not None: geom_cache['R_enu'] = R_enu
         
         sat_positions = {}
         for s, d in sd_epoca.items():
             if s == '_meta' or s == '_tow_b' or d['sd_P'] is None: continue 
             
-            sp_r = None
+            sp_r = None; el_r = 0.0; az_r = 0.0
             if geom_cache is not None and tr in geom_cache and s in geom_cache[tr]:
                 sp_r = geom_cache[tr][s]['sp_r']
+                el_r = geom_cache[tr][s]['el']
+                az_r = geom_cache[tr][s]['az']
             else:
                 tau_r = d['pr_r'] / C_LIGHT
                 t_emision_r = tr - tau_r
@@ -996,15 +1014,18 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 if not sp_r:
                     sp_r = calcular_posicion_satelite_wgs84(seleccionar_efemeride_optima(nav.get(s), t_emision_r), t_emision_r, tau_r, s[0])
                     
-                if geom_cache is not None:
-                    if tr not in geom_cache: geom_cache[tr] = {}
-                    if s not in geom_cache[tr]: geom_cache[tr][s] = {}
-                    geom_cache[tr][s]['sp_r'] = sp_r
+                if sp_r:
+                    # [MODIFICACIÓN QUIRÚRGICA: Topocéntricas ancladas en X_b_corr (1 solo cálculo)]
+                    el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_b_corr, Y_b_corr, Z_b_corr)
+                    if geom_cache is not None:
+                        if tr not in geom_cache: geom_cache[tr] = {}
+                        geom_cache[tr][s] = {'sp_r': sp_r, 'el': el_r, 'az': az_r}
                 
             if sp_r:
-                el_r, az_r = calcular_topocentricas(sp_r[0], sp_r[1], sp_r[2], X_iter, Y_iter, Z_iter)
-                if el_r >= max(8.0, mask_angle):  # [OPTIMIZACIÓN: Piso intermedio de 8.0° para equilibrar 2D y 1D]
-                    sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': d.get('snr', 30.0)}
+                # [MODIFICACIÓN QUIRÚRGICA: Integración piso SNR Dinámico]
+                snr_val = d.get('snr', 30.0)
+                if el_r >= max(8.0, mask_angle) and snr_val >= min_snr:
+                    sat_positions[s] = {'sp': sp_r, 'el': el_r, 'az': az_r, 'sd_P': d['sd_P'], 'snr': snr_val}
         
         if len(sat_positions) < 4: return None, "FAILED", None
         
@@ -1021,9 +1042,6 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, geom
                 sat_list.extend(c_sats)
         
         if len(sat_list) < 3: return None, "FAILED", None
-        
-        lat_init, lon_init, _ = ecef_a_geodesicas(X_iter, Y_iter, Z_iter)
-        R_enu = obtener_matriz_rotacion_enu(lat_init, lon_init)
         
         base_rho = {}
         for s_key, s_data in sat_positions.items():
@@ -1227,10 +1245,8 @@ def generar_informe_homogeneizacion_detallado(base_name, rover_name, base_raw, r
     
     dist_baseline = math.sqrt((c_base['N'] - c_rover['N'])**2 + (c_base['E'] - c_rover['E'])**2 + (c_base['Z'] - c_rover['Z'])**2)
     
-    sug_iter = 4
-    if es < 150: sug_iter = 8
-    elif es < 300: sug_iter = 6
-    elif es < 500: sug_iter = 5
+    # [MODIFICACIÓN QUIRÚRGICA: Fórmula de Iteración Dinámica]
+    sug_iter = max(3, min(10, math.ceil(1200.0 / float(max(1, es)))))
     
     b_ini_str = f"{b_ini[0]}-{b_ini[1]:02d}-{b_ini[2]:02d} {b_ini[3]:02d}:{b_ini[4]:02d}:{b_ini[5]}" if b_ini else "N/A"
     b_fin_str = f"{b_fin[0]}-{b_fin[1]:02d}-{b_fin[2]:02d} {b_fin[3]:02d}:{b_fin[4]:02d}:{b_fin[5]}" if b_fin else "N/A"
@@ -1272,7 +1288,7 @@ def generar_informe_homogeneizacion_detallado(base_name, rover_name, base_raw, r
 [3] MATRIZ RESULTANTE (ESTRICTA, CON INTERPOLACIÓN DINÁMICA)
   [-] Épocas Útiles Sincronizadas: {es}
   [-] Tasa de Éxito sobre Rover  : {f_14(t_exito)}%
-  [-] Iteraciones EKF Sugeridas  : {sug_iter} (Basado en densidad)
+  [-] Iteraciones EKF Sugeridas  : {sug_iter} (Dinámico por densidad)
 
 [4] ENRUTADOR AUTOMÁTICO DE CÁLCULO
   [-] Módulo Asignado           : {modo_str}
@@ -1621,6 +1637,7 @@ def tab3_calibrar():
             lat_b, lon_b, _ = utm_a_geodesicas(utm_e, utm_n, utm_h, utm_hem)
             X_b, Y_b, Z_b = geodesicas_a_ecef(lat_b, lon_b, utm_c + h_b)
 
+            # [MODIFICACIÓN QUIRÚRGICA: Caché maestro unificado (ENU y Topocéntricas)]
             geom_cache = {}
 
             yield f"> [SISTEMA] Iniciando Búsqueda Determinista Libre | {modo_str} (IRLS + ENU | max_gap={p_max_gap}s | iter={p_iter})...\n"
@@ -1631,7 +1648,10 @@ def tab3_calibrar():
             
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
-            t_sample = t_sample_full  # [100% de épocas procesadas]
+            
+            # [MODIFICACIÓN QUIRÚRGICA: Muestreo por densidad (Top 160)]
+            t_sample_sorted = sorted(t_sample_full, key=lambda t: len(sd_suavizada[t]), reverse=True)
+            t_sample = t_sample_sorted[:160] 
             
             yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
             yield f"  [-] Épocas totales en archivo: {total_eps}\n"
@@ -1644,8 +1664,9 @@ def tab3_calibrar():
                     yield "\n> [ALERTA] Freno de mano de 28.0s activado. Abortando Fase 1 para evitar timeout de Render.\n"
                     break
                 if os.path.exists(flag_file): break
-                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
-                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, geom_cache=geom_cache)
+                
+                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, min_snr=p_snr, geom_cache=geom_cache)
+                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, min_snr=p_snr, geom_cache=geom_cache)
                 
                 if sem:
                     la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
@@ -1669,9 +1690,9 @@ def tab3_calibrar():
             best_rmse = float('inf')
             best_params = {}
             
-            m_center, m_span = 10.0, 5.0  # [OPTIMIZACIÓN: Centro de máscara ampliado]
-            cp_center, cp_span = 2.0, 1.5 # [OPTIMIZACIÓN: Filtro Planimétrico flexibilizado]
-            ca_center, ca_span = 2.0, 1.5 # [OPTIMIZACIÓN: Filtro Altimétrico flexibilizado]
+            m_center, m_span = 10.0, 5.0  
+            cp_center, cp_span = 2.0, 1.5 
+            ca_center, ca_span = 2.0, 1.5 
             
             def get_local_median(lst):
                 s = sorted(lst); n = len(s)
@@ -1699,8 +1720,9 @@ def tab3_calibrar():
                             time_out = True
                             break
                         if os.path.exists(flag_file): break
-                        if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, m, geom_cache=geom_cache)
-                        else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, m, geom_cache=geom_cache)
+                        
+                        if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, m, min_snr=p_snr, geom_cache=geom_cache)
+                        else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, m, min_snr=p_snr, geom_cache=geom_cache)
                         
                         if sem:
                             la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
@@ -1738,7 +1760,14 @@ def tab3_calibrar():
                     ca_center, ca_span = float(best_params['ca']), ca_span / 2.0
                 else:
                     m_span /= 2.0; cp_span /= 2.0; ca_span /= 2.0
-            
+
+            # [MODIFICACIÓN QUIRÚRGICA: Salida Segura ante Timeout]
+            if os.path.exists(flag_file) or time_out:
+                yield "\n> [SISTEMA] SE FORZÓ LA DETENCIÓN DEL BUCLE. PROCEDIENDO A EXTRAER EL MEJOR DATO RECOPILADO...\n"
+                if global_best_score == float('inf'):
+                     yield "> [ERROR] Timeout: El modelo no tuvo tiempo de converger ni 1 iteración. Reduzca la data base.\n"
+                     return
+
             if best_rmse != float('inf'):
                 guardar_estado(uid, 'opt_mask', float(best_params['mask']))
                 guardar_estado(uid, 'opt_cp', float(best_params['cp']))
@@ -1752,9 +1781,6 @@ def tab3_calibrar():
                 
                 fecha_calculo = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 t_exec_script = time.time() - start_time
-
-                if os.path.exists(flag_file) or time_out:
-                    yield "\n> [SISTEMA] SE FORZÓ LA DETENCIÓN DEL BUCLE. PROCEDIENDO A EXTRAER EL MEJOR DATO RECOPILADO...\n"
 
                 yield "\n========================================================\n"
                 yield f"      [INFORME] PARÁMETROS ÓPTIMOS LIBRES ({modo_str})\n"
@@ -1884,8 +1910,10 @@ def tab4_procesar():
 
                 if c % max(1, t_eps // 10) == 0: yield f"[PROGRESO] Resolviendo Matrices IRLS DGPS (ENU)... {int((c / float(t_eps)) * 100.0)}%\n"
                 
-                if modo_str == "MODO_D_DGPS": sem, status, pdop_val = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, geom_cache=None)
-                else: sem, status, pdop_val = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, geom_cache=None)
+                # [MODIFICACIÓN QUIRÚRGICA: Inyección del SNR Óptimo en Tab 4]
+                snr_val = leer_estado(uid, 'opt_snr') or 25.0
+                if modo_str == "MODO_D_DGPS": sem, status, pdop_val = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
+                else: sem, status, pdop_val = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
                 
                 if sem:
                     la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
