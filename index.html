@@ -275,7 +275,7 @@
             <h2 class="text-xl mb-4 font-semibold border-b border-gray-600 pb-2">Ajuste de Red DGPS Diferencial (Cálculo Rover Desconocido)</h2>
             <p class="text-sm text-gray-400 mb-4">El motor leerá automáticamente las coordenadas y parámetros óptimos fijados por la Caja Negra. Introduzca el nombre del punto medido y el enlace del Rover.</p>
             
-            <form id="form-tab4" onsubmit="submitForm(event, '/API/tab4_procesar', 'console4', null)">
+            <form id="form-tab4" onsubmit="event.preventDefault();">
                 <div class="grid grid-cols-1 gap-4 mb-4">
                     <div>
                         <h3 class="text-blue-400 font-bold text-sm mb-2">NUEVO ARCHIVO ROVER (PUNTO DESCONOCIDO)</h3>
@@ -292,8 +292,11 @@
                 </div>
 
                 <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 mt-4 border-t border-gray-700 pt-4">
-                    <button type="submit" class="w-full bg-green-600 hover:bg-green-500 py-3 rounded font-bold transition text-lg shadow-lg">Procesar Punto Desconocido</button>
-                    <button type="button" onclick="reiniciarProceso()" class="w-full bg-red-700 hover:bg-red-600 py-3 rounded font-bold transition text-lg shadow-lg border border-red-500">INICIAR DE NUEVO (RESET)</button>
+                    <button type="button" id="btn-v1" onclick="ejecutarPaso1()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded font-bold transition text-sm shadow-lg border border-blue-400">PASO 1: EXTRAER COTA (V1)</button>
+                    <button type="button" id="btn-v6" onclick="ejecutarPaso2()" disabled class="w-full bg-green-800 text-gray-400 py-3 rounded font-bold transition text-sm shadow-lg border border-gray-600 opacity-50 cursor-not-allowed">PASO 2: PLANIMETRÍA Y FUSIÓN (V6)</button>
+                </div>
+                <div class="mt-4">
+                    <button type="button" onclick="reiniciarProceso()" class="w-full bg-red-700 hover:bg-red-600 py-2 rounded font-bold transition text-sm shadow-lg border border-red-500">INICIAR DE NUEVO (RESET LÍNEA BASE)</button>
                 </div>
             </form>
             
@@ -503,6 +506,22 @@
                 desbloquearFormulario(i);
                 if (i > 1) document.getElementById('btn-tab' + i).classList.add('disabled-tab');
             }
+            
+            // Restore Tab 4 buttons
+            const btn1 = document.getElementById('btn-v1');
+            const btn2 = document.getElementById('btn-v6');
+            if(btn1) {
+                btn1.innerText = "PASO 1: EXTRAER COTA (V1)";
+                btn1.disabled = false;
+                btn1.classList.replace('bg-gray-700', 'bg-blue-600');
+            }
+            if(btn2) {
+                btn2.innerText = "PASO 2: PLANIMETRÍA Y FUSIÓN (V6)";
+                btn2.disabled = true;
+                btn2.classList.remove('bg-green-600', 'hover:bg-green-500', 'text-white');
+                btn2.classList.add('bg-green-800', 'text-gray-400', 'opacity-50', 'cursor-not-allowed');
+            }
+
             switchTab(1);
         }
 
@@ -639,6 +658,49 @@
             }
         }
 
+        function ejecutarPaso1() {
+            const form = document.getElementById('form-tab4');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            const fakeEvent = { preventDefault: () => {}, target: form };
+            const btn1 = document.getElementById('btn-v1');
+            const btn2 = document.getElementById('btn-v6');
+            
+            btn1.innerText = "PROCESANDO COTA...";
+            btn1.disabled = true;
+            
+            submitForm(fakeEvent, '/API/tab4_procesar_v1', 'console4', null).then(() => {
+                const consola = document.getElementById('console4').textContent;
+                if(consola.includes('[ÉXITO PASO 1]')) {
+                    btn1.innerText = "COTA V1 AISLADA ✓";
+                    btn1.classList.replace('bg-blue-600', 'bg-gray-700');
+                    btn2.disabled = false;
+                    btn2.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-green-800', 'text-gray-400');
+                    btn2.classList.add('bg-green-600', 'hover:bg-green-500', 'text-white');
+                } else {
+                    btn1.innerText = "FALLO EN PASO 1";
+                    btn1.disabled = false;
+                }
+            });
+        }
+
+        function ejecutarPaso2() {
+            const form = document.getElementById('form-tab4');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            const fakeEvent = { preventDefault: () => {}, target: form };
+            const btn2 = document.getElementById('btn-v6');
+            
+            btn2.innerText = "FUSIONANDO MATRICES...";
+            btn2.disabled = true;
+            
+            submitForm(fakeEvent, '/API/tab4_procesar_v6', 'console4', null);
+        }
+
         async function submitForm(e, url, consoleId, nextTab) {
             e.preventDefault();
             const form = e.target;
@@ -646,7 +708,10 @@
             const display = document.getElementById(consoleId);
             
             initAudio(); 
-            display.textContent = "> Iniciando comunicación con el motor GNSSJP...\n";
+            
+            if(url !== '/API/tab4_procesar_v6') {
+                display.textContent = "> Iniciando comunicación con el motor GNSSJP...\n";
+            }
             
             const pdfButtons = ['btn-pdf-tab1', 'btn-pdf-tab2', 'btn-pdf-tab3', 'btn-pdf-tab4'];
             pdfButtons.forEach(id => {
@@ -736,7 +801,11 @@
                         }
                     }
                     
-                    display.textContent = fullOutput;
+                    if(url === '/API/tab4_procesar_v6') {
+                        display.textContent += text;
+                    } else {
+                        display.textContent = fullOutput;
+                    }
                     display.scrollTop = display.scrollHeight;
                 }
 
@@ -791,7 +860,7 @@
                 
                 let lineasCrudas = display.textContent.split('\n');
                 let reporteLimpio = lineasCrudas.filter(l => 
-                    !l.includes('[SUCCESS]') && !l.includes('[PROGRESO]') && l.trim() !== ''
+                    !l.includes('[SUCCESS]') && !l.includes('[PROGRESO]') && !l.includes('[ÉXITO PASO 1]') && l.trim() !== ''
                 ).map(l => l.startsWith('>') ? l.substring(1).trim() : l);
 
                 if (reporteLimpio.length === 0) { alert("No hay datos válidos."); return; }
