@@ -875,9 +875,9 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [OPTIMIZACIÓN OR: Techo restaurado. Se confía en el freno dinámico de 1cm 
-        # y en el freno maestro de 28.5s para permitir convergencias profundas (iter 5 o 6)]
-        for iteracion in range(8):
+        # [OPTIMIZACIÓN OR: Bucle liberado a 25. Control absoluto transferido al 
+        # seguro de convergencia (< 1e-2) y al freno maestro de servidor.]
+        for iteracion in range(25):
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
@@ -1061,9 +1061,9 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [OPTIMIZACIÓN OR: Techo restaurado. Se confía en el freno dinámico de 1cm 
-        # y en el freno maestro de 28.5s para permitir convergencias profundas (iter 5 o 6)]
-        for iteracion in range(8):
+        # [OPTIMIZACIÓN OR: Bucle liberado a 25. Control absoluto transferido al 
+        # seguro de convergencia (< 1e-2) y al freno maestro de servidor.]
+        for iteracion in range(25):
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
@@ -1249,7 +1249,8 @@ def generar_informe_homogeneizacion_detallado(base_name, rover_name, base_raw, r
     
     dist_baseline = math.sqrt((c_base['N'] - c_rover['N'])**2 + (c_base['E'] - c_rover['E'])**2 + (c_base['Z'] - c_rover['Z'])**2)
     
-    sug_iter = max(3, min(10, math.ceil(1200.0 / float(max(1, es)))))
+    # [OPTIMIZACIÓN OR: Etiqueta dinámica infinita para Frontend]
+    sug_iter = "∞ (Dinámico por Freno 28.5s)"
     
     b_ini_str = f"{b_ini[0]}-{b_ini[1]:02d}-{b_ini[2]:02d} {b_ini[3]:02d}:{b_ini[4]:02d}:{b_ini[5]}" if b_ini else "N/A"
     b_fin_str = f"{b_fin[0]}-{b_fin[1]:02d}-{b_fin[2]:02d} {b_fin[3]:02d}:{b_fin[4]:02d}:{b_fin[5]}" if b_fin else "N/A"
@@ -1291,7 +1292,7 @@ def generar_informe_homogeneizacion_detallado(base_name, rover_name, base_raw, r
 [3] MATRIZ RESULTANTE (ESTRICTA, CON INTERPOLACIÓN DINÁMICA)
   [-] Épocas Útiles Sincronizadas: {es}
   [-] Tasa de Éxito sobre Rover  : {f_14(t_exito)}%
-  [-] Iteraciones EKF Sugeridas  : {sug_iter} (Dinámico por densidad)
+  [-] Iteraciones EKF Sugeridas  : {sug_iter}
 
 [4] ENRUTADOR AUTOMÁTICO DE CÁLCULO
   [-] Módulo Asignado           : {modo_str}
@@ -1608,7 +1609,6 @@ def tab3_calibrar():
 
     p_max_gap = safe_f(request.form.get('param_max_gap'), 0.5)
     p_snr = safe_f(request.form.get('param_snr'), 25.0)
-    p_iter = max(1, safe_i(request.form.get('param_iter'), 6))
 
     def procesar():
         try:
@@ -1642,7 +1642,7 @@ def tab3_calibrar():
 
             geom_cache = {}
 
-            yield f"> [SISTEMA] Iniciando Búsqueda Determinista Libre | {modo_str} (IRLS + ENU | max_gap={p_max_gap}s | iter={p_iter})...\n"
+            yield f"> [SISTEMA] Iniciando Búsqueda Determinista Libre | {modo_str} (IRLS + ENU | max_gap={p_max_gap}s)...\n"
             if modo_str == "MODO_D_DGPS": sd_suavizada = aislar_diferencias_MODO_D(obs_b_raw, obs_r_raw)
             else: sd_suavizada = aislar_diferencias_MODO_B(obs_b_raw, obs_r_raw)
             
@@ -1652,7 +1652,7 @@ def tab3_calibrar():
             total_eps = len(t_sample_full)
             
             # [OPTIMIZACIÓN OR: "Algoritmo Goloso". Se ordena por densidad, procesando todo. 
-            # El freno de mano (28s) actuará como un discriminador de calidad dinámico.]
+            # El freno de mano (28.5s) actuará como un discriminador de calidad dinámico.]
             t_sample = sorted(t_sample_full, key=lambda t: len(sd_suavizada[t]), reverse=True) 
             
             yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
@@ -1662,15 +1662,14 @@ def tab3_calibrar():
             yield "[PROGRESO] Fase 1: Extracción de Límites y Poblando Caché (Pre-Scan IRLS)...\n"
             coords_raw = []
             for t in t_sample:
-                # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.
-                # Rescata la lista 'coords' acumulada en lugar de descartarla.]
+                # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.]
                 if time.time() - start_time > 28.5:
                     yield "\n> [ALERTA] Freno de mano de 28.5s activado. Abortando Fase 1 para evitar timeout de Render.\n"
                     break
                 if os.path.exists(flag_file): break
                 
-                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, min_snr=p_snr, geom_cache=geom_cache)
-                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 8.0, min_snr=p_snr, geom_cache=geom_cache)
+                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 12.0, min_snr=p_snr, geom_cache=geom_cache)
+                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, 12.0, min_snr=p_snr, geom_cache=geom_cache)
                 
                 if sem:
                     la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
@@ -1694,7 +1693,8 @@ def tab3_calibrar():
             best_rmse = float('inf')
             best_params = {}
             
-            m_center, m_span = 12.0, 5.0  
+            # [OPTIMIZACIÓN OR: Máscara inicial elevada a 15.0 para mitigar tropósfera (Cota)]
+            m_center, m_span = 15.0, 5.0  
             cp_center, cp_span = 2.0, 1.5 
             ca_center, ca_span = 2.0, 1.5 
             
@@ -1704,11 +1704,16 @@ def tab3_calibrar():
                 return s[n//2] if n % 2 == 1 else (s[n//2 - 1] + s[n//2]) / 2.0
             
             time_out = False
-            for nivel in range(p_iter):
+            nivel = 0
+            
+            # [OPTIMIZACIÓN OR: Bucle Infinito. La grilla profundizará hasta que el reloj marque 28.5s]
+            while True:
                 if time_out or os.path.exists(flag_file): break
-                yield f"  [+] Refinando espacio de búsqueda libre (Zoom {nivel+1}/{p_iter})...\n"
+                nivel += 1
+                yield f"  [+] Refinando espacio de búsqueda libre (Zoom {nivel}/∞)...\n"
                 
-                m_grid = [max(10.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
+                # Piso de máscara restaurado a 12.0 para blindar el vector Z
+                m_grid = [max(12.0, x) for x in [m_center - m_span, m_center, m_center + m_span]]
                 cp_grid = [max(2.0, x) for x in [cp_center - cp_span, cp_center, cp_center + cp_span]]
                 ca_grid = [max(2.0, x) for x in [ca_center - ca_span, ca_center, ca_center + ca_span]]
                 
@@ -1720,8 +1725,7 @@ def tab3_calibrar():
                     
                     coords = []
                     for t in t_sample:
-                        # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.
-                        # Rescata la lista 'coords' acumulada en lugar de descartarla.]
+                        # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.]
                         if time.time() - start_time > 28.5:
                             time_out = True
                             break
@@ -1747,18 +1751,22 @@ def tab3_calibrar():
                             res = estadistica_desacoplada(coords, cp, ca, best_eh, best_ev, med_estaticas)
                             if res[0] is None: continue
                             nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res
-                            rmse_3d = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + ((zf - h_r) - utm_c_r)**2)
                             
-                            if rmse_3d < nivel_best_rmse:
-                                nivel_best_rmse = rmse_3d
+                            # [OPTIMIZACIÓN OR: Función de Costo Asimétrica. Penalizamos el error Z multiplicándolo 
+                            # por 2.0 para forzar al modelo a proteger la Cota y evitar su degradación.]
+                            rmse_ponderado = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + 2.0 * ((zf - h_r) - utm_c_r)**2)
+                            
+                            if rmse_ponderado < nivel_best_rmse:
+                                rmse_3d = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + ((zf - h_r) - utm_c_r)**2)
+                                nivel_best_rmse = rmse_ponderado
                                 nivel_best_params = {'m': float(m), 'cp': float(cp), 'ca': float(ca), 'rmse': float(rmse_3d)}
-                                if rmse_3d < global_best_score:
-                                    global_best_score = rmse_3d
+                                if rmse_ponderado < global_best_score:
+                                    global_best_score = rmse_ponderado
                                     best_rmse = rmse_3d
                                     best_params = {'mask': float(m), 'cp': float(cp), 'ca': float(ca), 'eh': float(best_eh), 'ev': float(best_ev), 'max_gap': float(p_max_gap), 'snr': float(p_snr), 'rmse': float(rmse_3d), 'ret': int(ret)}
                 
                 if nivel_best_rmse != float('inf') and not time_out:
-                    yield f"  [*] Fin Iteración {nivel+1} | Mejor RMSE Local: {f_14(nivel_best_params['rmse'])} m\n"
+                    yield f"  [*] Fin Iteración {nivel} | Mejor RMSE Local: {f_14(nivel_best_params['rmse'])} m\n"
                     
                 if global_best_score != float('inf'):
                     m_center, m_span = float(best_params['mask']), m_span / 2.0
