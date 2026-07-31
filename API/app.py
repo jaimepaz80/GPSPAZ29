@@ -842,7 +842,6 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         
         if len(sat_positions) < 4: return None, "FAILED", None
         
-        # [OPTIMIZACIÓN OR: Uso del 100% del espectro satelital para restaurar PDOP Vertical (Cota)]
         sat_list_full = list(sat_positions.keys())
         
         constellations = set([s[0] for s in sat_list_full])
@@ -875,9 +874,9 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [OPTIMIZACIÓN OR: Bucle liberado a 25. Control absoluto transferido al 
-        # seguro de convergencia (< 1e-2) y al freno maestro de servidor.]
-        for iteracion in range(25):
+        # [MODIFICACIÓN QUIRÚRGICA: Bucle liberado (99 max como seguridad infinita) 
+        # subordinado estrictamente al límite de convergencia milimétrico.]
+        for iteracion in range(99):
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
@@ -957,8 +956,8 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
                 v_val = sum(H[r][idx] * Delta_ENU[idx][0] for idx in range(len(H[0]))) - L[r][0]
                 prev_residuals.append(v_val)
             
-            # [MODIFICACIÓN QUIRÚRGICA: Relajación Freno de Convergencia a 1cm]
-            if max(abs(dE), abs(dN), abs(dU)) < 1e-2:
+            # [MODIFICACIÓN QUIRÚRGICA: Restauración del freno a 1 milímetro (1e-3)]
+            if max(abs(dE), abs(dN), abs(dU)) < 1e-3:
                 return (X_iter - dx_tide, Y_iter - dy_tide, Z_iter - dz_tide), "FLOAT (IRLS Rescate ENU)", pdop
                 
         return (X_iter - dx_tide, Y_iter - dy_tide, Z_iter - dz_tide), "FLOAT (IRLS Rescate ENU)", pdop
@@ -1028,7 +1027,6 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         
         if len(sat_positions) < 4: return None, "FAILED", None
         
-        # [OPTIMIZACIÓN OR: Uso del 100% del espectro satelital para restaurar PDOP Vertical (Cota)]
         sat_list_full = list(sat_positions.keys())
         
         constellations = set([s[0] for s in sat_list_full])
@@ -1061,9 +1059,9 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [OPTIMIZACIÓN OR: Bucle liberado a 25. Control absoluto transferido al 
-        # seguro de convergencia (< 1e-2) y al freno maestro de servidor.]
-        for iteracion in range(25):
+        # [MODIFICACIÓN QUIRÚRGICA: Bucle liberado (99 max como seguridad infinita) 
+        # subordinado estrictamente al límite de convergencia milimétrico.]
+        for iteracion in range(99):
             H = []; L = []; W_diag = [] 
             
             ref_calcs = {}
@@ -1143,8 +1141,8 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
                 v_val = sum(H[r][idx] * Delta_ENU[idx][0] for idx in range(len(H[0]))) - L[r][0]
                 prev_residuals.append(v_val)
             
-            # [MODIFICACIÓN QUIRÚRGICA: Relajación Freno de Convergencia a 1cm]
-            if max(abs(dE), abs(dN), abs(dU)) < 1e-2:
+            # [MODIFICACIÓN QUIRÚRGICA: Restauración del freno a 1 milímetro (1e-3)]
+            if max(abs(dE), abs(dN), abs(dU)) < 1e-3:
                 return (X_iter - dx_tide, Y_iter - dy_tide, Z_iter - dz_tide), "FLOAT (DGPS Código Puro ENU)", pdop
                 
         return (X_iter - dx_tide, Y_iter - dy_tide, Z_iter - dz_tide), "FLOAT (DGPS Código Puro ENU)", pdop
@@ -1249,7 +1247,6 @@ def generar_informe_homogeneizacion_detallado(base_name, rover_name, base_raw, r
     
     dist_baseline = math.sqrt((c_base['N'] - c_rover['N'])**2 + (c_base['E'] - c_rover['E'])**2 + (c_base['Z'] - c_rover['Z'])**2)
     
-    # [OPTIMIZACIÓN OR: Etiqueta dinámica infinita para Frontend]
     sug_iter = "∞ (Dinámico por Freno 28.5s)"
     
     b_ini_str = f"{b_ini[0]}-{b_ini[1]:02d}-{b_ini[2]:02d} {b_ini[3]:02d}:{b_ini[4]:02d}:{b_ini[5]}" if b_ini else "N/A"
@@ -1651,9 +1648,8 @@ def tab3_calibrar():
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
             
-            # [OPTIMIZACIÓN OR: "Algoritmo Goloso". Se ordena por densidad, procesando todo. 
-            # El freno de mano (28.5s) actuará como un discriminador de calidad dinámico.]
-            t_sample = sorted(t_sample_full, key=lambda t: len(sd_suavizada[t]), reverse=True) 
+            # [MODIFICACIÓN QUIRÚRGICA: Orden cronológico estricto.]
+            t_sample = t_sample_full 
             
             yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
             yield f"  [-] Épocas totales en archivo: {total_eps}\n"
@@ -1752,16 +1748,14 @@ def tab3_calibrar():
                             if res[0] is None: continue
                             nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res
                             
-                            # [OPTIMIZACIÓN OR: Función de Costo Asimétrica. Penalizamos el error Z multiplicándolo 
-                            # por 2.0 para forzar al modelo a proteger la Cota y evitar su degradación.]
-                            rmse_ponderado = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + 2.0 * ((zf - h_r) - utm_c_r)**2)
+                            # [MODIFICACIÓN QUIRÚRGICA: RMSE Euclidiano 3D Puro]
+                            rmse_3d = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + ((zf - h_r) - utm_c_r)**2)
                             
-                            if rmse_ponderado < nivel_best_rmse:
-                                rmse_3d = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + ((zf - h_r) - utm_c_r)**2)
-                                nivel_best_rmse = rmse_ponderado
+                            if rmse_3d < nivel_best_rmse:
+                                nivel_best_rmse = rmse_3d
                                 nivel_best_params = {'m': float(m), 'cp': float(cp), 'ca': float(ca), 'rmse': float(rmse_3d)}
-                                if rmse_ponderado < global_best_score:
-                                    global_best_score = rmse_ponderado
+                                if rmse_3d < global_best_score:
+                                    global_best_score = rmse_3d
                                     best_rmse = rmse_3d
                                     best_params = {'mask': float(m), 'cp': float(cp), 'ca': float(ca), 'eh': float(best_eh), 'ev': float(best_ev), 'max_gap': float(p_max_gap), 'snr': float(p_snr), 'rmse': float(rmse_3d), 'ret': int(ret)}
                 
