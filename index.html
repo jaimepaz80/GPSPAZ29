@@ -238,7 +238,6 @@
             <p class="text-sm text-gray-400 mb-4">El motor optimizará de manera autónoma los filtros estadísticos utilizando los datos inyectados en la Pestaña 1. <span class="text-red-400 font-bold">Solo lectura. Modificación bloqueada por sistema.</span></p>
             
             <form id="form-tab3">
-                
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                     <div class="sm:col-span-2"><h3 class="text-red-400 font-bold text-sm">PUNTOS DE ARRANQUE (DEFAULT SYSTEM)</h3></div>
                     <div><label class="block text-xs text-gray-500">Límite Horizontal Teórico Inicial (m):</label><input type="number" step="any" name="err_hor_max" value="1.50" class="w-full bg-gray-900 text-gray-500 p-1 text-sm rounded border border-gray-700 cursor-not-allowed" readonly></div>
@@ -526,12 +525,10 @@
             let epocasBase = 0;
             let epocasRover = 0;
             
-            const matchBase = cons1.match(/PARÁMETROS DE CONTROL \(BASE\).*
-.*Épocas Crudas Registradas\s*:\s*(\d+)/s);
+            const matchBase = cons1.match(/PARÁMETROS DE CONTROL \(BASE\).*\n.*Épocas Crudas Registradas\s*:\s*(\d+)/s);
             if (matchBase) epocasBase = parseInt(matchBase[1]);
             
-            const matchRover = cons1.match(/PARÁMETROS DEL MÓVIL \(ROVER\).*
-.*Épocas Crudas Registradas\s*:\s*(\d+)/s);
+            const matchRover = cons1.match(/PARÁMETROS DEL MÓVIL \(ROVER\).*\n.*Épocas Crudas Registradas\s*:\s*(\d+)/s);
             if (matchRover) epocasRover = parseInt(matchRover[1]);
 
             const iterField = document.getElementById('param_iter');
@@ -549,9 +546,7 @@
             const modal = document.getElementById('progress-modal');
             modal.classList.add('hidden');
             const display = document.getElementById('console3');
-            display.textContent += "
-[!] Operación cancelada por el usuario.
-";
+            display.textContent += "\n[!] Operación cancelada por el usuario.\n";
             desbloquearFormulario(3);
         }
 
@@ -830,4 +825,3 @@
     </script>
 </body>
 </html>
-
