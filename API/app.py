@@ -871,8 +871,6 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [MODIFICACIÓN QUIRÚRGICA: Bucle liberado (99 max como seguridad infinita) 
-        # subordinado estrictamente al límite de convergencia milimétrico.]
         for iteracion in range(99):
             H = []; L = []; W_diag = [] 
             
@@ -953,7 +951,6 @@ def calcular_IRLS_MODO_B(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
                 v_val = sum(H[r][idx] * Delta_ENU[idx][0] for idx in range(len(H[0]))) - L[r][0]
                 prev_residuals.append(v_val)
             
-            # [MODIFICACIÓN QUIRÚRGICA: Restauración del freno a 1 milímetro (1e-3)]
             if max(abs(dE), abs(dN), abs(dU)) < 1e-3:
                 return (X_iter - dx_tide, Y_iter - dy_tide, Z_iter - dz_tide), "FLOAT (IRLS Rescate ENU)", pdop
                 
@@ -1056,8 +1053,6 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
         prev_residuals = [0.0] * len(sat_list)
         pdop = 99.9
 
-        # [MODIFICACIÓN QUIRÚRGICA: Bucle liberado (99 max como seguridad infinita) 
-        # subordinado estrictamente al límite de convergencia milimétrico.]
         for iteracion in range(99):
             H = []; L = []; W_diag = [] 
             
@@ -1138,7 +1133,6 @@ def calcular_IRLS_MODO_D(sd_epoca, nav, sp3, X_b, Y_b, Z_b, tr, mask_angle, min_
                 v_val = sum(H[r][idx] * Delta_ENU[idx][0] for idx in range(len(H[0]))) - L[r][0]
                 prev_residuals.append(v_val)
             
-            # [MODIFICACIÓN QUIRÚRGICA: Restauración del freno a 1 milímetro (1e-3)]
             if max(abs(dE), abs(dN), abs(dU)) < 1e-3:
                 return (X_iter - dx_tide, Y_iter - dy_tide, Z_iter - dz_tide), "FLOAT (DGPS Código Puro ENU)", pdop
                 
@@ -1324,16 +1318,16 @@ def generar_informe_ascii_dual(p_dict):
 
 [2] AUDITORÍA DE MOTORES INDEPENDIENTES
 ------------------------------------------------------------------------
-  >>> MOTOR ALTIMÉTRICO (V1 - Elevación Libre con Máscara Forzada 15.0°)
+  >>> MOTOR ALTIMÉTRICO (V1 - Elevación Libre Pura Original)
       * Filtros aplicados  : {f_14(p_dict['cp'])} Sigma (Plani) | {f_14(p_dict['ca'])} Sigma (Alti)
-      * Máscara Elevación  : 15.0° (Protección Troposférica estricta para Vector Z)
-      * Acción Ejecutada   : Cero calibración inyectada.
+      * Máscara Elevación  : {f_14(p_dict['mask'])}° (Optimización nativa)
+      * Acción Ejecutada   : Cero calibración inyectada (Preservación Vector Z).
       
-  >>> MOTOR PLANIMÉTRICO (V6 - Ajuste de Red con Máscara Optimizada)
+  >>> MOTOR PLANIMÉTRICO (V6 - Ajuste de Red Local con Shift)
       * Vector Absorbido   : Shift_N={f_14(p_dict['shift_n_aplicado'])}m | Shift_E={f_14(p_dict['shift_e_aplicado'])}m
       * Acción Ejecutada   : Traslación determinista de Matriz de Covarianza.
 
-[3] RESULTADOS VECTORIALES FINALES (FUSIÓN QUIRÚRGICA)
+[3] RESULTADOS VECTORIALES FINALES (FUSIÓN HÍBRIDA V7)
 ------------------------------------------------------------------------
   * COORDENADA DE CONTROL (BASE FIJA TERRENO):
       Norte : {f_14(p_dict['b_n'])} m
@@ -1343,7 +1337,7 @@ def generar_informe_ascii_dual(p_dict):
   * COORDENADA MÓVIL CALCULADA:
       Norte : {f_14(p_dict['r_n_calc'])} m  (Procesado por V6)
       Este  : {f_14(p_dict['r_e_calc'])} m  (Procesado por V6)
-      Cota  : {f_14(p_dict['r_z_calc'])} m  (Procesado por V1 con 15.0°)
+      Cota  : {f_14(p_dict['r_z_calc'])} m  (Procesado por V1 Puro)
 ========================================================================
 """
     return informe
@@ -1630,8 +1624,6 @@ def tab3_calibrar():
             
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
-            
-            # [MODIFICACIÓN QUIRÚRGICA: Orden cronológico estricto.]
             t_sample = t_sample_full 
             
             yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
@@ -1726,7 +1718,6 @@ def tab3_calibrar():
                             if res[0] is None: continue
                             nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res
                             
-                            # [MODIFICACIÓN QUIRÚRGICA: RMSE Euclidiano 3D Puro]
                             rmse_3d = math.sqrt((nf - utm_n_r)**2 + (ef - utm_e_r)**2 + ((zf - h_r) - utm_c_r)**2)
                             
                             if rmse_3d < nivel_best_rmse:
@@ -1762,7 +1753,6 @@ def tab3_calibrar():
                 guardar_estado(uid, 'opt_eh', float(best_params['eh']))
                 guardar_estado(uid, 'opt_ev', float(best_params['ev']))
                 
-                # [MODIFICACIÓN QUIRÚRGICA: Cálculo determinista del Vector de Calibración Local]
                 shift_n = utm_n_r - float(best_params['nf'])
                 shift_e = utm_e_r - float(best_params['ef'])
                 shift_z = utm_c_r - (float(best_params['zf']) - h_r)
@@ -1816,8 +1806,9 @@ def tab4_procesar_v1():
     h_b = safe_f(leer_estado(uid, 'altura_base'), 0.0)
     modo_hardware = leer_estado(uid, 'modo_hardware') or 'iguales'
     
-    # [MODIFICACIÓN QUIRÚRGICA V1]: Forzar máscara estricta a 15.0° para neutralizar tropósfera en eje Z
-    p_mask = 15.0 
+    # [RESTITUCIÓN V1 PURA]: Se restaura la máscara optimizada nativa de la Caja Negra 
+    # para recuperar la cota original con error milimétrico histórico (~0.08 m).
+    p_mask = safe_f(leer_estado(uid, 'opt_mask'), 3.5)
     
     p_cp = safe_f(leer_estado(uid, 'opt_cp'), 2.0)
     p_ca = safe_f(leer_estado(uid, 'opt_ca'), 2.0)
@@ -1831,7 +1822,7 @@ def tab4_procesar_v1():
 
     def procesar():
         try:
-            yield "> [SISTEMA] Iniciando Motor V1 (Aislamiento Altimétrico con Máscara Forzada 15.0°)...\n"
+            yield "> [SISTEMA] Iniciando Motor V1 (Aislamiento Altimétrico con Máscara Nativa V1)...\n"
             yield "> [RED] Descargando Nuevo RINEX Rover...\n"
             descargar_desde_gdrive(url_rover_nuevo, p_r_nuevo)
             
@@ -1882,7 +1873,7 @@ def tab4_procesar_v1():
             guardar_estado(uid, 'v1_cota_aislada', zf_final_ground)
             guardar_estado(uid, 'v1_tiempo_cpu', time.time() - start_time)
             
-            yield f"  [-] Cota calculada con Máscara 15.0° (V1): {f_14(zf_final_ground)} m\n"
+            yield f"  [-] Cota calculada con Máscara Nativa V1: {f_14(zf_final_ground)} m\n"
             yield "\n[ÉXITO PASO 1] Motor V1 en espera. Proceda a Planimetría V6."
         except Exception as e: yield f"\n> [ERROR FATAL V1] {str(e)}"
     return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
