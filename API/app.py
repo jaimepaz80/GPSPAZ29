@@ -208,7 +208,6 @@ def multiplicar_matriz_vector_3x3(R, v):
         R[1][0]*v[0] + R[1][1]*v[1] + R[1][2]*v[2],
         R[2][0]*v[0] + R[2][1]*v[1] + R[2][2]*v[2]
     ]
-
 # =====================================================================
 # PARSERS Y GESTIÓN DE ARCHIVOS CON INTERPOLACIÓN TEMPORAL EXACTA
 # =====================================================================
@@ -529,7 +528,6 @@ def seleccionar_efemeride_optima(eph_list, t_target):
             valid_ephs.append((abs(dt), eph))
     if not valid_ephs: return None
     return min(valid_ephs, key=lambda x: x[0])[1]
-
 # =====================================================================
 # GEODESIA ESPACIAL Y CORRECCIONES ATMOSFÉRICAS
 # =====================================================================
@@ -778,7 +776,6 @@ def aislar_diferencias_MODO_D(obs_b, obs_r):
             }
         if len(sd_epoca) > 1: sd_suavizada[tow] = sd_epoca
     return sd_suavizada
-
 # =====================================================================
 # VÍA 1 -> MÓDULO B: MOTOR IRLS ASINCRÓNICO CON PROYECCIÓN ENU RIGUROSA
 # =====================================================================
@@ -1298,19 +1295,7 @@ def generar_informe_homogeneizacion_detallado(base_name, rover_name, base_raw, r
 """
     return informe
 
-def generar_informe_ascii(tipo, p_dict):
-    estado_sol = "FLOAT"
-    
-    if p_dict.get('estrategia') == 'MODO_B_ASINCRONO':
-        estado_sol = 'FLOAT (DGPS IRLS Asincrónico + ENU Riguroso)'
-    elif p_dict.get('estrategia') == 'MODO_D_DGPS':
-        estado_sol = 'FLOAT (DGPS Código Puro Estricto + ENU)'
-        
-    err_h_str = f"± {f_14(p_dict['err_h'])} m (Vinculante)" if p_dict['err_h'] > 0.0 else 'Inactiva'
-    err_v_str = f"± {f_14(p_dict['err_v'])} m (Vinculante)" if p_dict['err_v'] > 0.0 else 'Inactiva'
-    sp3_str = p_dict.get('sp3_file') if p_dict.get('sp3_file') else "[CRÍTICO] Fallback no permitido"
-    nav_str = p_dict.get('nav_file', "auto_nav.nav")
-    
+def generar_informe_ascii_dual(p_dict):
     fecha_calculo = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     dist_baseline = math.sqrt((p_dict['b_n'] - p_dict['r_n_calc'])**2 + (p_dict['b_e'] - p_dict['r_e_calc'])**2 + (p_dict['b_z'] - p_dict['r_z_calc'])**2)
 
@@ -1319,51 +1304,49 @@ def generar_informe_ascii(tipo, p_dict):
              INFORME DE PROCESAMIENTO GNSSJP PRO (V18.3)
 ========================================================================
 
-[*] IDENTIFICACIÓN DE ESTACIONES Y RESULTADO ({estado_sol})
+[*] IDENTIFICACIÓN DE ESTACIONES (ARQUITECTURA HÍBRIDA V1 + V6)
 ------------------------------------------------------------------------
   [-] Fecha y Hora de Cálculo: {fecha_calculo}
   [-] Punto Base (Pivote)    : {p_dict.get('nombre_base', 'BASE')}
   [-] Punto Móvil (Medido)   : {p_dict.get('nombre_medido', 'ROVER')}
   [-] Altura Antena Base     : {f_14(p_dict.get('h_b', 0.0))} m
   [-] Altura Antena Móvil    : {f_14(p_dict.get('h_r_nuevo', 0.0))} m
-  [-] Tiempo de Ejecución    : {f_14(p_dict.get('t_exec', 0.0))} segundos
-  [-] Tolerancia Horizontal  : {err_h_str}
-  [-] Tolerancia Vertical    : {err_v_str}
-  [-] Máscara Elevación      : {f_14(p_dict['mask'])}° (Optimizado libre)
-  [-] Filtro Planimétrico    : {f_14(p_dict['cp'])} Sigma
-  [-] Filtro Altimétrico     : {f_14(p_dict['ca'])} Sigma
+  [-] Tiempos de CPU Aislados: V1={f_14(p_dict.get('t_exec_v1', 0.0))}s | V6={f_14(p_dict.get('t_exec_v6', 0.0))}s
 
 [1] TRAZABILIDAD DEL PROYECTO Y ARCHIVOS
 ------------------------------------------------------------------------
   [-] Archivo Control (Base) : {p_dict['base_file']}
   [-] Archivo Móvil (Rover)  : {p_dict['rover_file']}
-  [-] Archivo Efemérides NAV : {nav_str} (Ionósfera Klobuchar)
-  [-] Archivo Preciso SP3    : {sp3_str} (Órbitas y Relojes)
+  [-] Archivo Efemérides NAV : {p_dict.get('nav_file', 'auto_nav.nav')}
+  [-] Archivo Preciso SP3    : {p_dict.get('sp3_file', 'N/A')}
   [-] Proyección Espacial    : WGS84 / UTM Zona {p_dict.get('utm_h', 19)}{p_dict.get('utm_hem', 'N')}
   [-] Distancia Línea Base   : {f_14(dist_baseline)} m
 
-[2] CALIDAD GEOMÉTRICA Y ESTADÍSTICA (QA / QC)
+[2] AUDITORÍA DE MOTORES INDEPENDIENTES
 ------------------------------------------------------------------------
-  [-] PDOP Geométrico Promed.: {f_14(p_dict.get('pdop', 99.9))}
-  [-] Ratio Confiab. (LAMBDA): {f_14(p_dict.get('lambda_ratio', 0.0))}
-  [-] Error Horizontal (RMS) : ± {f_14(math.hypot(p_dict['std_n'], p_dict['std_e']))} m
-  [-] Error Espacial (3D RMS): ± {f_14(math.sqrt(p_dict['std_n']**2 + p_dict['std_e']**2 + p_dict['std_z']**2))} m
+  >>> MOTOR ALTIMÉTRICO (V1 - Elevación Libre)
+      * Filtros aplicados  : {f_14(p_dict['cp'])} Sigma (Plani) | {f_14(p_dict['ca'])} Sigma (Alti)
+      * Tolerancias límite : H={f_14(p_dict['err_h'])}m | V={f_14(p_dict['err_v'])}m
+      * Acción Ejecutada   : Cero calibración inyectada (Protección Troposférica).
+      
+  >>> MOTOR PLANIMÉTRICO (V6 - Ajuste de Red)
+      * Vector Absorbido   : Shift_N={f_14(p_dict['shift_n_aplicado'])}m | Shift_E={f_14(p_dict['shift_e_aplicado'])}m
+      * Acción Ejecutada   : Traslación determinista de Matriz de Covarianza.
 
-[3] RESULTADOS VECTORIALES FINALES (DIFERENCIAL PURO)
+[3] RESULTADOS VECTORIALES FINALES (FUSIÓN QUIRÚRGICA)
 ------------------------------------------------------------------------
   * COORDENADA DE CONTROL (BASE FIJA TERRENO):
       Norte : {f_14(p_dict['b_n'])} m
       Este  : {f_14(p_dict['b_e'])} m
       Cota  : {f_14(p_dict['b_z'])} m
 
-  * COORDENADA CALCULADA (AJUSTE {estado_sol} AL TERRENO):
-      Norte : {f_14(p_dict['r_n_calc'])} m
-      Este  : {f_14(p_dict['r_e_calc'])} m
-      Cota  : {f_14(p_dict['r_z_calc'])} m
+  * COORDENADA MÓVIL CALCULADA:
+      Norte : {f_14(p_dict['r_n_calc'])} m  (Procesado por V6)
+      Este  : {f_14(p_dict['r_e_calc'])} m  (Procesado por V6)
+      Cota  : {f_14(p_dict['r_z_calc'])} m  (Procesado por V1)
 ========================================================================
 """
     return informe
-
 # =====================================================================
 # RUTAS FLASK (ENRUTADOR AUTÓNOMO Y DOBLE VÍA AISLADA)
 # =====================================================================
@@ -1648,8 +1631,7 @@ def tab3_calibrar():
             t_sample_full = list(sd_suavizada.keys())
             total_eps = len(t_sample_full)
             
-            # [MODIFICACIÓN QUIRÚRGICA: Orden cronológico estricto. Se anula la alteración por densidad 
-            # para preservar la correlación temporal de los sesgos atmosféricos.]
+            # [MODIFICACIÓN QUIRÚRGICA: Orden cronológico estricto.]
             t_sample = t_sample_full 
             
             yield f"[PROGRESO OPTIMIZADOR RENDER] Muestreo Sistemático Absoluto Activo:\n"
@@ -1659,7 +1641,6 @@ def tab3_calibrar():
             yield "[PROGRESO] Fase 1: Extracción de Límites y Poblando Caché (Pre-Scan IRLS)...\n"
             coords_raw = []
             for t in t_sample:
-                # [OPTIMIZACIÓN OR: Ampliación del límite a 28.5s para aprovechar la instancia.]
                 if time.time() - start_time > 28.5:
                     yield "\n> [ALERTA] Freno de mano de 28.5s activado. Abortando Fase 1 para evitar timeout de Render.\n"
                     break
@@ -1702,7 +1683,6 @@ def tab3_calibrar():
             time_out = False
             nivel = 0
             
-            # [OPTIMIZACIÓN OR: Bucle Infinito. La grilla profundizará hasta que el reloj marque 28.5s]
             while True:
                 if time_out or os.path.exists(flag_file): break
                 nivel += 1
@@ -1822,10 +1802,92 @@ def tab3_calibrar():
         except Exception as e: yield f"\n> [ERROR FATAL] {str(e)}"
     return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
 
-@app.route('/API/tab4_procesar', methods=['POST'])
-def tab4_procesar():
+@app.route('/API/tab4_procesar_v1', methods=['POST'])
+def tab4_procesar_v1():
     start_time = time.time()
+    uid = request.form.get('uid', request.remote_addr)
+    ws = get_workspace(uid)
     
+    utm_n = safe_f(leer_estado(uid, 'utm_norte'), 0.0)
+    utm_e = safe_f(leer_estado(uid, 'utm_este'), 0.0)
+    utm_c = safe_f(leer_estado(uid, 'utm_cota'), 0.0)
+    utm_h = safe_i(leer_estado(uid, 'utm_huso'), 19)
+    utm_hem = leer_estado(uid, 'utm_hemisferio') or 'N'
+    h_b = safe_f(leer_estado(uid, 'altura_base'), 0.0)
+    modo_hardware = leer_estado(uid, 'modo_hardware') or 'iguales'
+    
+    p_mask = safe_f(leer_estado(uid, 'opt_mask'), 3.5)
+    p_cp = safe_f(leer_estado(uid, 'opt_cp'), 2.0)
+    p_ca = safe_f(leer_estado(uid, 'opt_ca'), 2.0)
+    err_hor_max = safe_f(leer_estado(uid, 'opt_eh'), 0.0)
+    err_ver_max = safe_f(leer_estado(uid, 'opt_ev'), 0.0)
+    p_max_gap = safe_f(leer_estado(uid, 'opt_max_gap'), 2.0)
+
+    url_rover_nuevo = request.form.get('url_rover_nuevo')
+    h_r_nuevo = safe_f(request.form.get('altura_rover_nuevo'), 0.0)
+    p_r_nuevo = os.path.join(ws, 'rover_nuevo_raw.obs')
+
+    def procesar():
+        try:
+            yield "> [SISTEMA] Iniciando Motor V1 (Aislamiento Altimétrico)...\n"
+            yield "> [RED] Descargando Nuevo RINEX Rover...\n"
+            descargar_desde_gdrive(url_rover_nuevo, p_r_nuevo)
+            
+            nav_path = leer_estado(uid, 'nav_path')
+            sp3_path = leer_estado(uid, 'sp3_path')
+            p_b_raw = leer_estado(uid, 'base_raw') 
+
+            obs_b_raw = parse_rinex_obs_completo(p_b_raw)
+            obs_r_raw = parse_rinex_obs_completo(p_r_nuevo) 
+            nav = parse_rinex_nav_real(nav_path)
+            sp3 = parse_sp3_preciso(sp3_path)
+            
+            modo_str, ratio, msg = analizar_calidad_y_senales_rinex(obs_b_raw, obs_r_raw, modo_hardware=modo_hardware, max_gap_tolerado=p_max_gap)
+            lat_b, lon_b, _ = utm_a_geodesicas(utm_e, utm_n, utm_h, utm_hem)
+            X_b, Y_b, Z_b = geodesicas_a_ecef(lat_b, lon_b, utm_c + h_b)
+
+            rover_tows = sorted(list(obs_r_raw.keys()), key=lambda k: obs_r_raw[k].get('_meta', (0,0,0,0,0,0)))
+            obs_b_sync = {}
+            tiempos_base_preordenados = sorted(list(obs_b_raw.keys()), key=lambda k: obs_b_raw[k].get('_meta', (0,0,0,0,0,0)))
+            
+            for tr in rover_tows:
+                if time.time() - start_time > 28.5: break
+                base_interp = interpolar_base_a_rover(obs_b_raw, tr, max_gap=p_max_gap, tiempos_base=tiempos_base_preordenados)
+                if base_interp:
+                    obs_b_sync[tr] = base_interp
+                    obs_b_sync[tr]['_meta'] = obs_r_raw[tr]['_meta']
+
+            if modo_str == "MODO_D_DGPS": sd_suavizada = aislar_diferencias_MODO_D(obs_b_sync, obs_r_raw)
+            else: sd_suavizada = aislar_diferencias_MODO_B(obs_b_sync, obs_r_raw)
+            
+            coords = []
+            for t in sd_suavizada:
+                if time.time() - start_time > 28.5: break
+                snr_val = leer_estado(uid, 'opt_snr') or 25.0
+                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
+                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
+                if sem:
+                    la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
+                    nt, et = geodesicas_a_utm(la, lo, utm_h)
+                    coords.append((float(nt), float(et), float(al), str(status)))
+
+            res_estadistica = estadistica_desacoplada(coords, p_cp, p_ca, err_hor_max, err_ver_max)
+            if res_estadistica[0] is None: yield "> [ERROR] Falla en filtro V1.\n"; return
+                
+            _, _, zf, _, _, _, _, _ = res_estadistica
+            zf_final_ground = float(zf) - h_r_nuevo
+            
+            guardar_estado(uid, 'v1_cota_aislada', zf_final_ground)
+            guardar_estado(uid, 'v1_tiempo_cpu', time.time() - start_time)
+            
+            yield f"  [-] Cota calculada sin Shift: {f_14(zf_final_ground)} m\n"
+            yield "\n[ÉXITO PASO 1] Motor V1 en espera. Proceda a Planimetría V6."
+        except Exception as e: yield f"\n> [ERROR FATAL V1] {str(e)}"
+    return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
+
+@app.route('/API/tab4_procesar_v6', methods=['POST'])
+def tab4_procesar_v6():
+    start_time = time.time()
     uid = request.form.get('uid', request.remote_addr)
     ws = get_workspace(uid)
     
@@ -1849,33 +1911,15 @@ def tab4_procesar():
     url_rover_nuevo = request.form.get('url_rover_nuevo')
     nombre_medido = request.form.get('nombre_medido', 'PUNTO_DESCONOCIDO')
     h_r_nuevo = safe_f(request.form.get('altura_rover_nuevo'), 0.0)
-    
-    if p_mask is None or utm_n is None:
-        return Response("> [ERROR FATAL] Parámetros or coordenadas no encontrados. Ejecute la Pestaña 3 primero.\n", mimetype='text/plain')
-
-    if not url_rover_nuevo or url_rover_nuevo.strip() == '': 
-        return Response("> [ERROR] Falta el enlace de Drive del nuevo archivo RINEX Rover.\n", mimetype='text/plain')
-
     p_r_nuevo = os.path.join(ws, 'rover_nuevo_raw.obs')
 
     def procesar():
         try:
-            yield "> [RED] Descargando Nuevo RINEX Rover desde Google Drive...\n"
-            descargar_desde_gdrive(url_rover_nuevo, p_r_nuevo)
-            rf_nuevo_filename = "Drive_Nuevo_Rover.obs"
+            yield "\n> [SISTEMA] Iniciando Motor V6 (Ajuste de Red Local)...\n"
             
             nav_path = leer_estado(uid, 'nav_path')
             sp3_path = leer_estado(uid, 'sp3_path')
             p_b_raw = leer_estado(uid, 'base_raw') 
-
-            if not p_b_raw or not os.path.exists(p_b_raw): 
-                yield "> [ERROR FATAL] Falta archivo RINEX Base original.\n"; return
-                
-            if not nav_path or not sp3_path:
-                yield "\n> [ERROR CRÍTICO RECHAZADO]\n"
-                yield "  [-] El cálculo geodésico estricto prohíbe el uso de broadcast nav para posicionamiento.\n"
-                yield "  [-] FALTA ARCHIVO SP3 (Órbitas precisas) o NAV (Modelo Ionosférico).\n"
-                yield "  [-] Vuelva a la Pestaña 2 y suba ambos productos obligatorios.\n"; return
 
             obs_b_raw = parse_rinex_obs_completo(p_b_raw)
             obs_r_raw = parse_rinex_obs_completo(p_r_nuevo) 
@@ -1883,25 +1927,15 @@ def tab4_procesar():
             sp3 = parse_sp3_preciso(sp3_path)
             
             modo_str, ratio, msg = analizar_calidad_y_senales_rinex(obs_b_raw, obs_r_raw, modo_hardware=modo_hardware, max_gap_tolerado=p_max_gap)
-            yield f"> [ENRUTADOR] Análisis completado: {msg}\n"
-            
             lat_b, lon_b, _ = utm_a_geodesicas(utm_e, utm_n, utm_h, utm_hem)
             X_b, Y_b, Z_b = geodesicas_a_ecef(lat_b, lon_b, utm_c + h_b)
-            
-            global_pdop = 99.9
-            global_lambda = 0.0
 
-            yield f"\n> [SISTEMA] Iniciando Procesamiento Definitivo Épocas Optimizadas | {modo_str} (IRLS + ENU | max_gap={p_max_gap}s)...\n"
-            yield "[PROGRESO] Extrayendo Observables Diferenciales con interpolación temporal flexible...\n"
-            
             rover_tows = sorted(list(obs_r_raw.keys()), key=lambda k: obs_r_raw[k].get('_meta', (0,0,0,0,0,0)))
             obs_b_sync = {}
             tiempos_base_preordenados = sorted(list(obs_b_raw.keys()), key=lambda k: obs_b_raw[k].get('_meta', (0,0,0,0,0,0)))
             
             for tr in rover_tows:
-                if time.time() - start_time > 28.5:
-                    yield "\n> [ALERTA] Freno de mano de 28.5s activado. Abortando interpolación para evitar timeout...\n"
-                    break
+                if time.time() - start_time > 28.5: break
                 base_interp = interpolar_base_a_rover(obs_b_raw, tr, max_gap=p_max_gap, tiempos_base=tiempos_base_preordenados)
                 if base_interp:
                     obs_b_sync[tr] = base_interp
@@ -1910,59 +1944,39 @@ def tab4_procesar():
             if modo_str == "MODO_D_DGPS": sd_suavizada = aislar_diferencias_MODO_D(obs_b_sync, obs_r_raw)
             else: sd_suavizada = aislar_diferencias_MODO_B(obs_b_sync, obs_r_raw)
             
-            if not sd_suavizada: yield "\n> [ERROR] No hay épocas sincronizadas válidas.\n"; return
-            
             coords = []
-            pdop_list = []
-            t_eps = len(sd_suavizada); c = 0
             for t in sd_suavizada:
-                c += 1
-                
-                if time.time() - start_time > 28.5:
-                    yield "\n> [ALERTA] Freno de mano de 28.5s alcanzado. Generando informe con las épocas procesadas hasta el momento...\n"
-                    break
-
-                if c % max(1, t_eps // 10) == 0: yield f"[PROGRESO] Resolviendo Matrices IRLS DGPS (ENU)... {int((c / float(t_eps)) * 100.0)}%\n"
-                
+                if time.time() - start_time > 28.5: break
                 snr_val = leer_estado(uid, 'opt_snr') or 25.0
-                if modo_str == "MODO_D_DGPS": sem, status, pdop_val = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
-                else: sem, status, pdop_val = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
-                
+                if modo_str == "MODO_D_DGPS": sem, status, _ = calcular_IRLS_MODO_D(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
+                else: sem, status, _ = calcular_IRLS_MODO_B(sd_suavizada[t], nav, sp3, X_b, Y_b, Z_b, t, p_mask, min_snr=snr_val, geom_cache=None)
                 if sem:
                     la, lo, al = ecef_a_geodesicas(sem[0], sem[1], sem[2])
                     nt, et = geodesicas_a_utm(la, lo, utm_h)
                     coords.append((float(nt), float(et), float(al), str(status)))
-                    if pdop_val: pdop_list.append(float(pdop_val))
-                    
-            if not coords: yield "\n> [ERROR] Fracaso algorítmico total en Inversión NxN.\n"; return
-            global_pdop = sum(pdop_list) / float(max(1, len(pdop_list)))
 
             res_estadistica = estadistica_desacoplada(coords, p_cp, p_ca, err_hor_max, err_ver_max)
-            if res_estadistica[0] is None:
-                yield "\n> [ERROR] Operación Abortada: El 100% de las épocas superan el Error Máximo configurado.\n"; return
+            if res_estadistica[0] is None: yield "> [ERROR] Operación Abortada en Filtro V6.\n"; return
                 
-            nf, ef, zf, std_n, std_e, std_z, ret, fix_ratio = res_estadistica
+            nf, ef, _, std_n, std_e, std_z, ret, fix_ratio = res_estadistica
             
-            # [MODIFICACIÓN QUIRÚRGICA: Absorción del Vector de Calibración Local]
+            # [EXTRACCIÓN DEL PUNTO COTA V1]
+            zf_final_v1 = safe_f(leer_estado(uid, 'v1_cota_aislada'), 0.0)
+            
+            # [APLICACIÓN DEL SHIFT V6 A LA PLANIMETRÍA]
             shift_n = safe_f(leer_estado(uid, 'shift_n'), 0.0)
             shift_e = safe_f(leer_estado(uid, 'shift_e'), 0.0)
-            shift_z = safe_f(leer_estado(uid, 'shift_z'), 0.0)
             
-            nf_final = float(nf) + shift_n
-            ef_final = float(ef) + shift_e
-            zf_final_ground = float(zf) - h_r_nuevo + shift_z
-            
-            exec_time = time.time() - start_time
+            nf_final_v6 = float(nf) + shift_n
+            ef_final_v6 = float(ef) + shift_e
             
             p_dict = {
                 'mask': float(p_mask), 'cp': float(p_cp), 'ca': float(p_ca),
-                'max_gap': float(p_max_gap), 'snr': 0.0,
                 'err_h': float(err_hor_max), 'err_v': float(err_ver_max),
-                'nf': float(nf_final), 'ef': float(ef_final), 'zf': float(zf_final_ground), 
-                'ret': int(ret), 'total': len(coords), 'std_n': float(std_n), 'std_e': float(std_e), 'std_z': float(std_z),
-                'ez': float(std_z), 'fix_r': float(fix_ratio), 'pdop': float(global_pdop), 'lambda_ratio': float(global_lambda),
+                'shift_n_aplicado': shift_n, 'shift_e_aplicado': shift_e,
+                'std_n': float(std_n), 'std_e': float(std_e), 'std_z': float(std_z),
                 'base_file': leer_estado(uid, 'name_base_raw') or "Drive_Base.obs",
-                'rover_file': rf_nuevo_filename,
+                'rover_file': "Drive_Nuevo_Rover.obs",
                 'nombre_base': str(nombre_base),
                 'nombre_medido': str(nombre_medido),
                 'h_b': float(h_b),
@@ -1970,17 +1984,16 @@ def tab4_procesar():
                 'nav_file': leer_estado(uid, 'name_nav_file') or "auto_nav.nav",
                 'sp3_file': leer_estado(uid, 'name_sp3_file'),
                 'b_n': float(utm_n), 'b_e': float(utm_e), 'b_z': float(utm_c),
-                'r_n_calc': float(nf_final), 'r_e_calc': float(ef_final), 'r_z_calc': float(zf_final_ground),
+                'r_n_calc': float(nf_final_v6), 'r_e_calc': float(ef_final_v6), 'r_z_calc': float(zf_final_v1),
                 'utm_h': int(utm_h), 'utm_hem': str(utm_hem),
-                'estrategia': str(estrategia),
-                'shift_applied': True,
-                't_exec': float(exec_time)
+                't_exec_v1': float(leer_estado(uid, 'v1_tiempo_cpu') or 0.0),
+                't_exec_v6': float(time.time() - start_time)
             }
             
-            yield "[PROGRESO] Procesamiento Geodésico Diferencial Puro Finalizado.\n"
-            yield generar_informe_ascii("MEDICION", p_dict)
+            yield "[PROGRESO] Fusión Vectorial Completada.\n"
+            yield generar_informe_ascii_dual(p_dict)
             yield "\n[SUCCESS]"
-        except Exception as e: yield f"\n> [ERROR FATAL] {str(e)}"
+        except Exception as e: yield f"\n> [ERROR FATAL V6] {str(e)}"
     return Response(procesar(), mimetype='text/plain', headers={'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache'})
 
 if __name__ == '__main__':
